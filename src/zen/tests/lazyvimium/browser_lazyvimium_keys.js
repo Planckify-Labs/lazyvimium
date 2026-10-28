@@ -45,6 +45,45 @@ add_task(async function test_actor_matches_web_pages() {
   BrowserTestUtils.removeTab(tab);
 });
 
+add_task(async function test_window_frame_follows_mode() {
+  const tab = await openPage();
+  const colors = () =>
+    ["zen-browser-background", "zen-toolbar-background"]
+      .map(id => getComputedStyle(document.getElementById(id), "::after"))
+      .map(style => style.backgroundColor)
+      .join("|");
+
+  await TestUtils.waitForCondition(
+    () => statuslineText().includes("NORMAL"),
+    "normal mode"
+  );
+  is(
+    document.documentElement.style.getPropertyValue(
+      "--lazyvimium-mode-background"
+    ),
+    gZenThemePicker.getGradient([{ c: [252, 167, 234] }]),
+    "normal mode colors the window through Zen's theme gradient"
+  );
+  const normal = colors();
+
+  await BrowserTestUtils.synthesizeMouseAtCenter(
+    "#field",
+    {},
+    tab.linkedBrowser
+  );
+  await TestUtils.waitForCondition(
+    () => colors() != normal,
+    "the frame and the sidebar change color in insert mode"
+  );
+
+  EventUtils.synthesizeKey("KEY_Escape");
+  await TestUtils.waitForCondition(
+    () => colors() == normal,
+    "<Esc> brings the normal mode color back"
+  );
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_j_scrolls_an_inner_pane() {
   const tab = await openPage(
     `<body style="margin: 0; overflow: hidden">

@@ -2,6 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* The window and its sidebar take the color of the current mode, through the
+   variables Zen's space themes set (ZenGradientGenerator). */
+:root[lazyvimium-mode] {
+  & #zen-browser-background {
+    --zen-main-browser-background: var(--lazyvimium-mode-background) !important;
+    --zen-main-browser-background-old: var(--lazyvimium-mode-background) !important;
+  }
+
+  & #zen-toolbar-background {
+    --zen-main-browser-background-toolbar: var(--lazyvimium-mode-background-toolbar) !important;
+    --zen-main-browser-background-toolbar-old: var(--lazyvimium-mode-background-toolbar) !important;
+  }
+
+  & .zen-browser-generic-background::after {
+    transition: background-color 0.15s ease-out;
+  }
+}
+
 /* Floating UI uses the glass of Zen's floating urlbar (zen-omnibox.css). */
 #lazyvimium-picker,
 #lazyvimium-which-key {

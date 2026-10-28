@@ -4,12 +4,16 @@
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-// tokyonight, LazyVim's default colorscheme, as lualine draws modes.
+// tokyonight moon as lualine draws modes, with NORMAL in pink instead of blue.
 const MODES = {
-  n: { label: "NORMAL", color: "#7aa2f7" },
-  i: { label: "INSERT", color: "#9ece6a" },
-  v: { label: "VISUAL", color: "#bb9af7" },
+  n: { label: "NORMAL", color: "#fca7ea" },
+  i: { label: "INSERT", color: "#c3e88d" },
+  v: { label: "VISUAL", color: "#c099ff" },
 };
+
+function rgb(hex) {
+  return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+}
 
 /**
  * The mode indicator in a browser window: the mode of the selected tab's
@@ -19,12 +23,17 @@ export class LazyvimiumStatusline {
   #element;
   #mode;
   #keys;
+  #root;
+  #window;
+  #color;
 
   /**
    * @param {Window} window A browser window.
    */
   constructor(window) {
     const document = window.document;
+    this.#window = window;
+    this.#root = document.documentElement;
     this.#element = document.createElementNS(HTML_NS, "div");
     this.#element.id = "lazyvimium-statusline";
     Object.assign(this.#element.style, {
@@ -48,7 +57,7 @@ export class LazyvimiumStatusline {
     Object.assign(this.#mode.style, {
       padding: "0 8px",
       borderRadius: "6px 0 0 6px",
-      color: "#1a1b26",
+      color: "#1b1d2b",
     });
     this.#keys = document.createElementNS(HTML_NS, "span");
 
@@ -64,10 +73,13 @@ export class LazyvimiumStatusline {
   update({ mode, tokens = [], count = null, group = null }) {
     const { label, color } = MODES[mode] ?? {
       label: mode.toUpperCase(),
-      color: "#e0af68",
+      color: "#ffc777",
     };
     this.#mode.textContent = label;
     this.#mode.style.background = color;
+    if (color != this.#color) {
+      this.#paintWindow(color);
+    }
     const typed = `${count ?? ""}${tokens.join("")}`;
     this.#keys.textContent = group ? `${typed} +${group}` : typed;
     this.#element.style.paddingRight = typed ? "8px" : "0";
@@ -79,9 +91,39 @@ export class LazyvimiumStatusline {
   setVisible(visible) {
     // The inline display: flex would win over the hidden attribute.
     this.#element.style.display = visible ? "flex" : "none";
+    this.#root.toggleAttribute("lazyvimium-mode", visible);
   }
 
   destroy() {
     this.#element.remove();
+    this.#root.removeAttribute("lazyvimium-mode");
+    this.#root.style.removeProperty("--lazyvimium-mode-background");
+    this.#root.style.removeProperty("--lazyvimium-mode-background-toolbar");
+  }
+
+  /**
+   * Color the window and its sidebar the way a Zen space theme with the mode
+   * color as its only dot would, so the opacity and blending of the space
+   * still apply and the sidebar keeps matching the frame.
+   *
+   * @param {string} color
+   */
+  #paintWindow(color) {
+    const picker = this.#window.gZenThemePicker;
+    const dot = [{ c: rgb(color) }];
+    const algo = picker?.useAlgo;
+    this.#root.style.setProperty(
+      "--lazyvimium-mode-background",
+      picker?.getGradient(dot) ?? color
+    );
+    this.#root.style.setProperty(
+      "--lazyvimium-mode-background-toolbar",
+      picker?.getGradient(dot, true) ?? color
+    );
+    if (picker) {
+      picker.useAlgo = algo;
+      // Before the theme picker exists the raw color is only a placeholder.
+      this.#color = color;
+    }
   }
 }
