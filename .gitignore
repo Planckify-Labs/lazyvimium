@@ -13,6 +13,9 @@ dist/
 
 windsign-temp/
 venv/
+.venv/
+.dev-profile/
+artifacts/
 
 !firefox-cache/
 win-cross/

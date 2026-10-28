@@ -1,0 +1,170 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* Floating UI uses the glass of Zen's floating urlbar (zen-omnibox.css). */
+#lazyvimium-picker,
+#lazyvimium-which-key {
+  --lazyvimium-glass-background: light-dark(rgb(255, 255, 255), rgb(24 24 24));
+
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-radius: 15px;
+  background-color: var(--lazyvimium-glass-background);
+  box-shadow: 0 30px 140px -15px light-dark(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.6));
+  outline: 0.5px solid light-dark(rgba(0, 0, 0, 0.2), rgb(75, 75, 75));
+  color: var(--toolbar-color, light-dark(rgb(21, 20, 26), rgb(251, 251, 254)));
+  font: menu;
+  font-size: 13px;
+
+  &:focus-visible {
+    outline: 0.5px solid light-dark(rgba(0, 0, 0, 0.2), rgb(75, 75, 75));
+  }
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* stylelint-disable-next-line media-query-no-invalid */
+@media -moz-pref("zen.theme.acrylic-urlbar") and (not (prefers-reduced-transparency: reduce)) {
+  :root:not([zen-no-acrylic="true"]) :is(#lazyvimium-picker, #lazyvimium-which-key) {
+    backdrop-filter: var(--zen-backdrop-underlay) blur(40px);
+
+    &:not(:-moz-window-inactive) {
+      --lazyvimium-glass-background: light-dark(rgba(255, 255, 255, 0.93), rgba(20, 20, 20, 0.92));
+    }
+  }
+}
+
+#lazyvimium-picker {
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 80vw);
+  max-height: 60vh;
+}
+
+/* which-key's "helix" preset, which LazyVim uses: one column in the bottom
+   right corner, 30 to 60 columns wide, above the statusline. */
+#lazyvimium-which-key {
+  right: 12px;
+  bottom: 44px;
+  min-width: 30ch;
+  max-width: min(60ch, 90vw);
+  max-height: 75vh;
+}
+
+.lazyvimium-which-key-title {
+  padding: 4px 8px 8px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.lazyvimium-which-key-list {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  column-gap: 8px;
+  row-gap: 3px;
+  padding: 0 8px;
+  overflow-y: auto;
+}
+
+.lazyvimium-which-key-item {
+  display: contents;
+}
+
+.lazyvimium-which-key-key {
+  justify-self: end;
+  color: light-dark(#b15c00, #ff9e64);
+  font: 700 12px/18px ui-monospace, monospace;
+}
+
+.lazyvimium-which-key-separator {
+  line-height: 18px;
+  opacity: 0.5;
+}
+
+.lazyvimium-which-key-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 18px;
+
+  [group] > & {
+    color: light-dark(#6d28d9, #bb9af7);
+  }
+}
+
+.lazyvimium-which-key-help {
+  padding: 8px 8px 2px;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.lazyvimium-picker-title {
+  padding: 6px 10px 8px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.lazyvimium-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.lazyvimium-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+
+  &[selected] {
+    background-color: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+  }
+}
+
+/* The label colors of flash.nvim in the user's LazyVim setup. */
+.lazyvimium-picker-key {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background-color: #a25772;
+  color: #eef5ff;
+  font: 700 12px/18px ui-monospace, monospace;
+  text-align: center;
+}
+
+.lazyvimium-picker-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.lazyvimium-picker-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lazyvimium-picker-detail {
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.lazyvimium-picker-help {
+  padding: 8px 10px 2px;
+  font-size: 11px;
+  opacity: 0.55;
+}

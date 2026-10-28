@@ -1,0 +1,57 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+EXTRA_JS_MODULES.lazyvimium += [
+    "Lazyvimium.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.actors += [
+    "actors/LazyvimiumKeysChild.sys.mjs",
+    "actors/LazyvimiumKeysParent.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.config += [
+    "config/LazyvimiumKeymaps.sys.mjs",
+    "config/LazyvimiumOptions.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.core += [
+    "core/LazyvimiumActions.sys.mjs",
+    "core/LazyvimiumDom.sys.mjs",
+    "core/LazyvimiumKeyEngine.sys.mjs",
+    "core/LazyvimiumKeymap.sys.mjs",
+    "core/LazyvimiumKeys.sys.mjs",
+    "core/LazyvimiumPlugins.sys.mjs",
+    "core/LazyvimiumShared.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.plugins += [
+    "plugins/LazyvimiumCore.sys.mjs",
+    "plugins/LazyvimiumCoreContent.sys.mjs",
+    "plugins/LazyvimiumEdit.sys.mjs",
+    "plugins/LazyvimiumEditContent.sys.mjs",
+    "plugins/LazyvimiumFind.sys.mjs",
+    "plugins/LazyvimiumInputs.sys.mjs",
+    "plugins/LazyvimiumInputsContent.sys.mjs",
+    "plugins/LazyvimiumLibrary.sys.mjs",
+    "plugins/LazyvimiumNavigation.sys.mjs",
+    "plugins/LazyvimiumScroll.sys.mjs",
+    "plugins/LazyvimiumScrollContent.sys.mjs",
+    "plugins/LazyvimiumSession.sys.mjs",
+    "plugins/LazyvimiumTabs.sys.mjs",
+    "plugins/LazyvimiumUi.sys.mjs",
+    "plugins/LazyvimiumWhichKeySpec.sys.mjs",
+    "plugins/LazyvimiumWindows.sys.mjs",
+    "plugins/LazyvimiumZenCommands.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.ui += [
+    "ui/LazyvimiumPicker.sys.mjs",
+    "ui/LazyvimiumStatusline.sys.mjs",
+    "ui/LazyvimiumWhichKey.sys.mjs",
+]
+
+FINAL_TARGET_FILES.modules.lazyvimium.ui += [
+    "ui/lazyvimium.css",
+]
