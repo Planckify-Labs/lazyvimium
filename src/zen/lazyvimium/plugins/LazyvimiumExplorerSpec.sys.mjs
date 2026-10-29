@@ -116,6 +116,22 @@ function inSidebar(desc, task) {
   };
 }
 
+// <CR>: switch to the row's tab, open or close its folder, or press the
+// button of the sidebar's foot under the cursor.
+function open(explorer, { window }) {
+  if (explorer.onFooter) {
+    return explorer.pressFooter();
+  }
+  const row = explorer.row;
+  if (row?.kind == "folder") {
+    setCollapsed(explorer, row.element, !row.element.collapsed);
+  } else if (row) {
+    window.gBrowser.selectedTab = lastUsed(row.tabs);
+    explorer.close();
+  }
+  return undefined;
+}
+
 function runCommand(window, id) {
   window.document.getElementById(id).doCommand();
 }
@@ -169,27 +185,33 @@ export const LazyvimiumExplorerSpec = {
       explorer.moveHalfPage(-1)
     ),
 
-    "explorer.open": inExplorer("Open", (explorer, { window }) => {
-      const row = explorer.row;
-      if (row?.kind == "folder") {
-        setCollapsed(explorer, row.element, !row.element.collapsed);
-      } else if (row) {
-        window.gBrowser.selectedTab = lastUsed(row.tabs);
-        explorer.close();
-      }
-    }),
+    "explorer.open": inExplorer("Open", open),
+    // On the sidebar's foot, l and h move over its buttons.
+    "explorer.right": inExplorer(
+      "Open, or Right on the Foot",
+      (explorer, context) =>
+        explorer.onFooter ? explorer.moveOnFooter(1) : open(explorer, context)
+    ),
     "explorer.preview": inExplorer(
       "Open, Keep Explorer",
       (explorer, { window }) => {
+        if (explorer.onFooter) {
+          return explorer.pressFooter();
+        }
         const row = explorer.row;
         if (row?.kind == "folder") {
           setCollapsed(explorer, row.element, !row.element.collapsed);
         } else if (row) {
           window.gBrowser.selectedTab = lastUsed(row.tabs);
         }
+        return undefined;
       }
     ),
     "explorer.collapse": inExplorer("Close Folder", explorer => {
+      if (explorer.onFooter) {
+        explorer.moveOnFooter(-1);
+        return;
+      }
       const row = explorer.row;
       if (row?.kind == "folder" && !row.element.collapsed) {
         setCollapsed(explorer, row.element, true);
@@ -304,6 +326,9 @@ export const LazyvimiumExplorerSpec = {
       const row = explorer.row;
       return row ? explorer.openMenu(row) : undefined;
     }),
+    "explorer.create": inExplorer("Create Menu", explorer =>
+      explorer.openCreateMenu()
+    ),
     "explorer.toggleSelect": inExplorer("Select", explorer =>
       explorer.togglePicked()
     ),

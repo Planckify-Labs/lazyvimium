@@ -51,6 +51,7 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
 EXTRA_JS_MODULES.lazyvimium.ui += [
     "ui/LazyvimiumExplorer.sys.mjs",
     "ui/LazyvimiumHints.sys.mjs",
+    "ui/LazyvimiumLibraryView.sys.mjs",
     "ui/LazyvimiumMenuKeys.sys.mjs",
     "ui/LazyvimiumPicker.sys.mjs",
     "ui/LazyvimiumStatusline.sys.mjs",

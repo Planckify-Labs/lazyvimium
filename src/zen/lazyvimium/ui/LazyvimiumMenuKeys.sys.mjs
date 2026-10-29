@@ -26,6 +26,37 @@ const KEY_CODES = {
   Escape: 27,
 };
 
+/** @type {WeakMap<Window, nsITextInputProcessor>} */
+const processors = new WeakMap();
+
+/**
+ * Type a key the way the keyboard would, for browser UI that only listens
+ * to the arrow keys and Escape. It is trusted, so it passes through the
+ * window's key listeners like a real one.
+ *
+ * @param {Window} window
+ * @param {"ArrowDown"|"ArrowUp"|"ArrowLeft"|"ArrowRight"|"Escape"} key
+ */
+export function sendKey(window, key) {
+  let tip = processors.get(window);
+  if (!tip) {
+    tip = Cc["@mozilla.org/text-input-processor;1"].createInstance(
+      Ci.nsITextInputProcessor
+    );
+    processors.set(window, tip);
+  }
+  if (!tip.beginInputTransaction(window, () => true)) {
+    return;
+  }
+  const keyEvent = new window.KeyboardEvent("", {
+    key,
+    code: key,
+    keyCode: KEY_CODES[key],
+  });
+  tip.keydown(keyEvent);
+  tip.keyup(keyEvent);
+}
+
 // Popups that take the keyboard: menus, and panels that are focused or
 // navigate with the arrow keys (PanelMultiView, like the main menu).
 // Autocomplete popups follow a field the user types in, and other
@@ -52,7 +83,6 @@ export class LazyvimiumMenuKeys {
   #window;
   /** @type {Set<Element>} */
   #open = new Set();
-  #tip = null;
 
   /**
    * @param {Window} window A browser window.
@@ -106,23 +136,6 @@ export class LazyvimiumMenuKeys {
     event.stopPropagation();
     // Once the key being handled is done: a key cannot be sent while
     // another is still being dispatched.
-    this.#window.setTimeout(() => this.#send(key), 0);
-  }
-
-  #send(key) {
-    const window = this.#window;
-    this.#tip ??= Cc["@mozilla.org/text-input-processor;1"].createInstance(
-      Ci.nsITextInputProcessor
-    );
-    if (!this.#tip.beginInputTransaction(window, () => true)) {
-      return;
-    }
-    const keyEvent = new window.KeyboardEvent("", {
-      key,
-      code: key,
-      keyCode: KEY_CODES[key],
-    });
-    this.#tip.keydown(keyEvent);
-    this.#tip.keyup(keyEvent);
+    this.#window.setTimeout(() => sendKey(this.#window, key), 0);
   }
 }

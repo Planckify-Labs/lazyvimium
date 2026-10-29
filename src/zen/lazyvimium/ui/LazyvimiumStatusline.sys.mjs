@@ -5,13 +5,15 @@
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 // tokyonight moon as lualine draws modes, with NORMAL in pink instead of blue,
-// the explorer taking the blue and the toolbar the command line's yellow.
+// the explorer taking the blue, the toolbar the command line's yellow and
+// the library the terminal's teal.
 const MODES = {
   n: { label: "NORMAL", color: "#fca7ea" },
   i: { label: "INSERT", color: "#c3e88d" },
   v: { label: "VISUAL", color: "#c099ff" },
   e: { label: "EXPLORER", color: "#82aaff" },
   t: { label: "TOOLBAR", color: "#ffc777" },
+  l: { label: "LIBRARY", color: "#4fd6be" },
 };
 
 function rgb(hex) {

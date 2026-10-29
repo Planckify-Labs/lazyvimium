@@ -41,6 +41,14 @@
   & .tab-group-label-container[lazyvimium-cursor] {
     outline-color: var(--lazyvimium-explorer-color);
   }
+
+  /* Below the last row: the buttons at the sidebar's foot. */
+  & #zen-sidebar-foot-buttons toolbarbutton[lazyvimium-cursor] {
+    outline: 2px solid var(--lazyvimium-explorer-color);
+    outline-offset: -2px;
+    border-radius: var(--border-radius-medium, 6px);
+    background-color: color-mix(in srgb, var(--lazyvimium-explorer-color) 30%, transparent);
+  }
 }
 
 /* The toolbar's cursor over the top bar's buttons and urlbar, in the
@@ -51,8 +59,25 @@
   border-radius: var(--border-radius-medium, 6px);
 }
 
+/* The library's cursor over a section's rows, the media grid, the spaces'
+   headers and tabs and the filter panel, in the statusline's LIBRARY color. */
+:root[lazyvimium-library] zen-library {
+  --lazyvimium-library-color: #4fd6be;
+
+  & [lazyvimium-cursor]:not(tab),
+  & tab[lazyvimium-cursor] > .tab-stack > .tab-background {
+    outline: 2px solid var(--lazyvimium-library-color);
+    outline-offset: -2px;
+  }
+
+  & .zen-library-row[lazyvimium-cursor] {
+    background-color: color-mix(in srgb, var(--lazyvimium-library-color) 18%, transparent);
+  }
+}
+
 #lazyvimium-explorer-focus,
-#lazyvimium-toolbar-focus {
+#lazyvimium-toolbar-focus,
+#lazyvimium-library-focus {
   position: fixed;
   width: 0;
   height: 0;

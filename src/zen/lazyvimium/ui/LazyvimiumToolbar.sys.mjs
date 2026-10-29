@@ -152,6 +152,10 @@ export class LazyvimiumToolbar {
     this.#onChange();
     // The bar may still be sliding in; place the cursor where it ends up.
     await new Promise(resolve => window.requestAnimationFrame(resolve));
+    // Closed again before the bar came to rest.
+    if (!this.#open) {
+      return;
+    }
     const items = this.items();
     const start = at ?? window.document.getElementById("urlbar-container");
     const index = items.indexOf(start);
@@ -246,6 +250,14 @@ export class LazyvimiumToolbar {
       window.gURLBar.select();
     } else if (item == window.PanelUI?.menuButton) {
       window.PanelUI.show();
+    } else if (
+      item.id == "zen-create-new-button" &&
+      !window.gZenWorkspaces.privateWindowOrDisabled
+    ) {
+      // Zen opens this menu on mousedown, which a press has none of.
+      window.document
+        .getElementById("zenCreateNewPopup")
+        .openPopup(item, "before_start", 0, 0, true);
     } else if (item.getAttribute("type") == "menu") {
       item.open = true;
     } else if (item.hasAttribute("command") || item.hasAttribute("oncommand")) {

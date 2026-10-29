@@ -92,6 +92,9 @@ export class LazyvimiumExplorer {
   /** @type {Element|null} The cursor row's element. */
   #cursor = null;
   #cursorIndex = 0;
+  /** @type {Element|null} The button of the sidebar's foot the cursor is on. */
+  #footer = null;
+  #footerIndex = 0;
   /** @type {Element|null} Where visual mode started. */
   #anchor = null;
   /** @type {Set<Element>} Rows picked with <Tab>. */
@@ -218,6 +221,7 @@ export class LazyvimiumExplorer {
     this.#controller.abort();
     this.#renaming.disconnect();
     this.#popups.clear();
+    this.#leaveFooter();
     this.#anchor = null;
     this.#picked.clear();
     this.#unmark();
@@ -278,10 +282,82 @@ export class LazyvimiumExplorer {
     return "explorer";
   }
 
-  /** @returns {LazyvimiumExplorerRow|null} */
+  /**
+   * @returns {LazyvimiumExplorerRow|null} The row under the cursor, none
+   *   while it is on the sidebar's foot.
+   */
   get row() {
+    if (this.#footer) {
+      return null;
+    }
     const rows = this.rows();
     return rows[this.#index(rows)] ?? null;
+  }
+
+  /** @returns {boolean} Whether the cursor is on the sidebar's foot. */
+  get onFooter() {
+    return !!this.#footer;
+  }
+
+  /**
+   * The buttons at the foot of the sidebar, left to right: the library,
+   * the spaces and the + menu, below the last row.
+   *
+   * @returns {Element[]}
+   */
+  footerButtons() {
+    const footer = this.#window.document.getElementById(
+      "zen-sidebar-foot-buttons"
+    );
+    return [...(footer?.querySelectorAll("toolbarbutton") ?? [])]
+      .filter(button => {
+        const rect = button.getBoundingClientRect();
+        return (
+          button.checkVisibility({ visibilityProperty: true }) &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      })
+      .sort(
+        (a, b) =>
+          a.getBoundingClientRect().left - b.getBoundingClientRect().left
+      );
+  }
+
+  /** @returns {Element|null} The foot's button under the cursor. */
+  get footerButton() {
+    return this.#footer;
+  }
+
+  /**
+   * @param {number} delta Buttons to move right, or left when negative.
+   */
+  moveOnFooter(delta) {
+    const buttons = this.footerButtons();
+    const index = buttons.indexOf(this.#footer);
+    this.#setFooter(buttons, (index == -1 ? this.#footerIndex : index) + delta);
+  }
+
+  /**
+   * Press the foot's button under the cursor, the way clicking it does.
+   * The + button opens its menu, the library button the library.
+   *
+   * @returns {Promise<void>|undefined}
+   */
+  pressFooter() {
+    const button = this.#footer;
+    if (!button) {
+      return undefined;
+    }
+    if (button.id == "zen-create-new-button") {
+      return this.openCreateMenu();
+    }
+    if (button.hasAttribute("command") || button.hasAttribute("oncommand")) {
+      button.doCommand();
+    } else {
+      button.click();
+    }
+    return undefined;
   }
 
   /** @returns {LazyvimiumExplorerRow[]} */
@@ -295,6 +371,9 @@ export class LazyvimiumExplorer {
    * @returns {Element[]}
    */
   targets() {
+    if (this.#footer) {
+      return [];
+    }
     const rows = this.rows();
     const picked = this.#selectedRows(rows);
     const chosen = picked.length ? picked : [rows[this.#index(rows)]];
@@ -302,11 +381,24 @@ export class LazyvimiumExplorer {
   }
 
   /**
+   * Moving down past the last row reaches the buttons at the sidebar's
+   * foot, and moving up from them goes back to the rows.
+   *
    * @param {number} delta Rows to move down, or up when negative.
    */
   move(delta) {
     const rows = this.rows();
-    this.#setCursor(rows, this.#index(rows) + delta);
+    if (this.#footer) {
+      if (delta < 0) {
+        this.#setCursor(rows, rows.length + delta);
+      }
+      return;
+    }
+    const index = this.#index(rows) + delta;
+    if (delta > 0 && index >= rows.length && this.#enterFooter()) {
+      return;
+    }
+    this.#setCursor(rows, index);
   }
 
   /**
@@ -347,20 +439,28 @@ export class LazyvimiumExplorer {
    * moved, opened or closed.
    */
   refresh() {
-    if (this.#open) {
-      const rows = this.rows();
-      this.#setCursor(rows, this.#index(rows));
+    if (!this.#open) {
+      return;
     }
+    if (this.#footer) {
+      this.moveOnFooter(0);
+      return;
+    }
+    const rows = this.rows();
+    this.#setCursor(rows, this.#index(rows));
   }
 
   toggleVisual() {
+    if (this.#footer) {
+      return;
+    }
     this.#anchor = this.#anchor ? null : this.#cursor;
     this.refresh();
     this.#onChange();
   }
 
   togglePicked() {
-    if (!this.#cursor) {
+    if (!this.#cursor || this.#footer) {
       return;
     }
     if (!this.#picked.delete(this.#cursor)) {
@@ -443,6 +543,32 @@ export class LazyvimiumExplorer {
   }
 
   /**
+   * Open the menu of the + button at the foot of the sidebar: new space,
+   * folder, split or tab.
+   *
+   * @returns {Promise<void>} Resolves once the menu is closed.
+   */
+  openCreateMenu() {
+    const window = this.#window;
+    const document = window.document;
+    const button = document.getElementById("zen-create-new-button");
+    const popup = document.getElementById("zenCreateNewPopup");
+    if (!button?.checkVisibility() || !popup) {
+      return Promise.resolve();
+    }
+    const { promise, resolve } = Promise.withResolvers();
+    const onHidden = event => {
+      if (event.target == popup) {
+        popup.removeEventListener("popuphidden", onHidden);
+        window.setTimeout(resolve, 0);
+      }
+    };
+    popup.addEventListener("popuphidden", onHidden);
+    popup.openPopup(button, "before_start", 0, 0, true);
+    return promise;
+  }
+
+  /**
    * Rename a tab or folder in place, the way double-clicking it does.
    *
    * @param {LazyvimiumExplorerRow} row
@@ -506,7 +632,13 @@ export class LazyvimiumExplorer {
     );
   }
 
+  // A space picked on the sidebar's foot switches tabs; the cursor stays on
+  // the foot.
   #followSelectedTab() {
+    if (this.#footer) {
+      this.moveOnFooter(0);
+      return;
+    }
     const rows = this.rows();
     const selected = this.#window.gBrowser.selectedTab;
     const index = rows.findIndex(row => row.tabs.includes(selected));
@@ -519,6 +651,7 @@ export class LazyvimiumExplorer {
   }
 
   #setCursor(rows, index) {
+    this.#leaveFooter();
     if (!rows.length) {
       this.#cursor = null;
       this.#unmark();
@@ -529,6 +662,34 @@ export class LazyvimiumExplorer {
     this.#cursor = row.element;
     this.#mark(rows);
     highlightOf(row)[0]?.scrollIntoView({ block: "nearest" });
+  }
+
+  // Not in visual mode: a selection is of rows.
+  #enterFooter() {
+    const buttons = this.footerButtons();
+    if (!buttons.length || this.#anchor) {
+      return false;
+    }
+    this.#unmark();
+    this.#setFooter(buttons, this.#footerIndex);
+    return true;
+  }
+
+  #setFooter(buttons, index) {
+    this.#footer?.removeAttribute("lazyvimium-cursor");
+    if (!buttons.length) {
+      this.#footer = null;
+      this.refresh();
+      return;
+    }
+    this.#footerIndex = Math.max(0, Math.min(index, buttons.length - 1));
+    this.#footer = buttons[this.#footerIndex];
+    this.#footer.setAttribute("lazyvimium-cursor", "true");
+  }
+
+  #leaveFooter() {
+    this.#footer?.removeAttribute("lazyvimium-cursor");
+    this.#footer = null;
   }
 
   #selectedRows(rows) {

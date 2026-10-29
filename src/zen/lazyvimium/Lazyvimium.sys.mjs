@@ -36,6 +36,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.sys.mjs",
   LazyvimiumExplorer:
     "resource:///modules/lazyvimium/ui/LazyvimiumExplorer.sys.mjs",
+  LazyvimiumLibraryView:
+    "resource:///modules/lazyvimium/ui/LazyvimiumLibraryView.sys.mjs",
   LazyvimiumMenuKeys:
     "resource:///modules/lazyvimium/ui/LazyvimiumMenuKeys.sys.mjs",
   LazyvimiumToolbar:
@@ -84,10 +86,10 @@ const VIM_MODE_DEFAULTS = {
   "zen.view.compact.hide-toolbar": true,
 };
 
-// The modes of the browser UI's own buffers, the sidebar's explorer and the
-// top bar, which run in the parent: their keys are typed in the browser UI,
-// not in a page.
-const CHROME_MODES = ["e", "t"];
+// The modes of the browser UI's own buffers, the sidebar's explorer, the
+// top bar and the library, which run in the parent: their keys are typed in
+// the browser UI, not in a page.
+const CHROME_MODES = ["e", "t", "l"];
 // The owner of the normal mode <leader> keys copied into those modes.
 const INHERITED_OWNER = "chrome-leader";
 
@@ -165,7 +167,7 @@ class LazyvimiumService {
    * browser window, with the key engine of its explorer and toolbar modes,
    * keyed by document, which a browser element reaches as ownerDocument.
    *
-   * @type {Map<Document, {statusline: object, whichKey: object, explorer: object, toolbar: object, menuKeys: object, engine: LazyvimiumKeyEngine|null}>}
+   * @type {Map<Document, {statusline: object, whichKey: object, explorer: object, toolbar: object, library: object, menuKeys: object, engine: LazyvimiumKeyEngine|null}>}
    */
   #windows = new Map();
 
@@ -228,6 +230,7 @@ class LazyvimiumService {
           if (!LazyvimiumOptions.enabled) {
             ui.explorer.close();
             ui.toolbar.close();
+            ui.library.release();
           }
         }
         break;
@@ -421,9 +424,20 @@ class LazyvimiumService {
     return this.#windows.get(window.document)?.toolbar ?? null;
   }
 
+  /**
+   * @param {Window} window
+   * @returns {object|null} The window's LazyvimiumLibraryView.
+   */
+  libraryFor(window) {
+    return this.#windows.get(window.document)?.library ?? null;
+  }
+
   // The browser UI buffer the keys go to, if one is open.
   #activeBuffer(ui) {
-    return [ui.explorer, ui.toolbar].find(buffer => buffer?.isOpen) ?? null;
+    return (
+      [ui.explorer, ui.toolbar, ui.library].find(buffer => buffer?.isOpen) ??
+      null
+    );
   }
 
   #stateOf(window, ui) {
@@ -432,7 +446,8 @@ class LazyvimiumService {
       return this.stateFor(window.gBrowser.selectedBrowser);
     }
     return {
-      mode: buffer.mode,
+      // The library's search box is its insert mode.
+      mode: buffer.inserting ? "i" : buffer.mode,
       ...this.#chromeEngine(window, ui).pending,
       field: false,
       visual: !!buffer.visual,
@@ -570,22 +585,30 @@ class LazyvimiumService {
       menuKeys: new lazy.LazyvimiumMenuKeys(window),
       explorer: null,
       toolbar: null,
+      library: null,
       engine: null,
     };
     const refresh = () => this.#showState(ui, this.#stateOf(window, ui));
     // One buffer of the browser UI is open at a time.
-    const onChange = (buffer, other) => {
+    const onChange = buffer => {
       if (buffer.isOpen) {
-        other.close();
+        for (const other of [ui.explorer, ui.toolbar, ui.library]) {
+          if (other != buffer) {
+            other.close();
+          }
+        }
       }
       ui.engine?.reset();
       refresh();
     };
     ui.explorer = new lazy.LazyvimiumExplorer(window, {
-      onChange: () => onChange(ui.explorer, ui.toolbar),
+      onChange: () => onChange(ui.explorer),
     });
     ui.toolbar = new lazy.LazyvimiumToolbar(window, {
-      onChange: () => onChange(ui.toolbar, ui.explorer),
+      onChange: () => onChange(ui.toolbar),
+    });
+    ui.library = new lazy.LazyvimiumLibraryView(window, {
+      onChange: () => onChange(ui.library),
     });
     this.#windows.set(window.document, ui);
     ui.statusline.setVisible(this.#statuslineVisible);
