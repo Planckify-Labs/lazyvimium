@@ -2,18 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import { LazyvimiumTheme } from "resource:///modules/lazyvimium/ui/LazyvimiumTheme.sys.mjs";
+
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-// tokyonight moon as lualine draws modes, with NORMAL in pink instead of blue,
-// the explorer taking the blue, the toolbar the command line's yellow and
-// the library the terminal's teal.
+// The mode colors are the theme's mode-<key> roles, in their dark variant:
+// the statusline is dark in both of Zen's themes.
 const MODES = {
-  n: { label: "NORMAL", color: "#fca7ea" },
-  i: { label: "INSERT", color: "#c3e88d" },
-  v: { label: "VISUAL", color: "#c099ff" },
-  e: { label: "EXPLORER", color: "#82aaff" },
-  t: { label: "TOOLBAR", color: "#ffc777" },
-  l: { label: "LIBRARY", color: "#4fd6be" },
+  n: "NORMAL",
+  i: "INSERT",
+  v: "VISUAL",
+  e: "EXPLORER",
+  t: "TOOLBAR",
+  l: "LIBRARY",
 };
 
 function rgb(hex) {
@@ -50,8 +51,8 @@ export class LazyvimiumStatusline {
       gap: "8px",
       padding: "0 8px 0 0",
       borderRadius: "6px",
-      background: "#1a1b26",
-      color: "#c0caf5",
+      background: LazyvimiumTheme.hex("statusline-background"),
+      color: LazyvimiumTheme.hex("statusline-text"),
       font: "600 11px/20px ui-monospace, monospace",
       pointerEvents: "none",
       boxShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
@@ -61,7 +62,7 @@ export class LazyvimiumStatusline {
     Object.assign(this.#mode.style, {
       padding: "0 8px",
       borderRadius: "6px 0 0 6px",
-      color: "#1b1d2b",
+      color: LazyvimiumTheme.hex("ink"),
     });
     this.#keys = document.createElementNS(HTML_NS, "span");
 
@@ -76,10 +77,10 @@ export class LazyvimiumStatusline {
    *   `visual` shows a selection made in another mode, like the explorer's.
    */
   update({ mode, tokens = [], count = null, group = null, visual = false }) {
-    const { label, color } = MODES[visual ? "v" : mode] ?? {
-      label: mode.toUpperCase(),
-      color: "#ffc777",
-    };
+    const key = visual ? "v" : mode;
+    const label = MODES[key] ?? mode.toUpperCase();
+    const color =
+      LazyvimiumTheme.hex(`mode-${key}`) ?? LazyvimiumTheme.hex("warning");
     this.#mode.textContent = label;
     this.#mode.style.background = color;
     if (color != this.#color) {

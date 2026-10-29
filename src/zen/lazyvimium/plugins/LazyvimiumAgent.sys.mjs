@@ -32,6 +32,11 @@ export const LazyvimiumAgentSpec = {
       agent: false,
       run: context => dock(context)?.pickAgent(),
     },
+    "agent.model": {
+      desc: "Select Agent Model",
+      agent: false,
+      run: context => dock(context)?.pickModel(),
+    },
     "agent.stop": {
       desc: "Stop Agent",
       agent: false,

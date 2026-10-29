@@ -17,9 +17,15 @@ import {
 } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentHarness.sys.mjs";
 import { LazyvimiumAgentLog } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentLog.sys.mjs";
 import { LazyvimiumAgentServer } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentServer.sys.mjs";
-import { LazyvimiumAgentToolbox } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentTools.sys.mjs";
+import {
+  LazyvimiumAgentToolbox,
+  tabIdOf,
+} from "resource:///modules/lazyvimium/agent/LazyvimiumAgentTools.sys.mjs";
+import { LazyvimiumTheme } from "resource:///modules/lazyvimium/ui/LazyvimiumTheme.sys.mjs";
 
 export const PREF_DEFAULT_AGENT = "lazyvimium.agent.default";
+// lazyvimium.agent.model.<agent id>: the model each agent runs with.
+export const PREF_MODEL = "lazyvimium.agent.model.";
 
 /**
  * @typedef {object} LazyvimiumAgentMessage
@@ -60,6 +66,7 @@ export class LazyvimiumAgentConversation {
   constructor(service, browser, agent) {
     this.#service = service;
     this.#browser = browser;
+    this.tabs.add(browser);
     this.agent = agent;
   }
 
@@ -81,7 +88,23 @@ export class LazyvimiumAgentConversation {
    */
   moveTo(browser) {
     this.#browser = browser;
+    this.tabs.add(browser);
   }
+
+  /**
+   * The browsers of every tab the conversation worked on, where the panel
+   * shows it.
+   *
+   * @type {Set<Element>}
+   */
+  tabs = new Set();
+
+  /**
+   * The tabs the agent opened, which it may close without asking.
+   *
+   * @type {WeakSet<Element>}
+   */
+  opened = new WeakSet();
 
   /**
    * @param {() => void} listener Called whenever anything changes.
@@ -148,6 +171,7 @@ export class LazyvimiumAgentConversation {
       turn: ++this.#turns,
       agent: this.agent.id,
       version: this.agent.version,
+      model: this.#service.modelFor(this.agent.id) || null,
       executable: this.agent.path,
       resume: this.resume,
       url: this.#browser.currentURI?.spec,
@@ -161,6 +185,7 @@ export class LazyvimiumAgentConversation {
       onStep: step => this.#onStep(step),
       confirm: question => this.#confirm(question),
       log,
+      opened: this.opened,
     });
     const token = LazyvimiumAgentServer.open(toolbox);
     this.#starting = true;
@@ -185,6 +210,7 @@ export class LazyvimiumAgentConversation {
       turn: {
         prompt: this.#prompt(text),
         resume: this.resume,
+        model: this.#service.modelFor(this.agent.id) || null,
         first,
         mcp: { url: LazyvimiumAgentServer.url, token },
         dir: this.#service.workDir,
@@ -196,7 +222,11 @@ export class LazyvimiumAgentConversation {
             this.resume = event.id;
             break;
           case "text":
-            if (event.delta && current) {
+            if (event.final && current) {
+              // The whole message, after the pieces streamed into it.
+              current.text = event.text;
+              this.changed();
+            } else if (event.delta && current) {
               current.text += event.text;
               this.changed();
             } else {
@@ -246,7 +276,9 @@ export class LazyvimiumAgentConversation {
   #prompt(text) {
     const browser = this.#browser;
     const title = browser.contentTitle || browser.currentURI?.spec || "";
-    return `The user is on the tab "${title}" (${browser.currentURI?.spec}).\n\nTheir request: ${text}`;
+    const tab = browser.documentGlobal?.gBrowser.getTabForBrowser(browser);
+    const id = tab ? `${tabIdOf(tab)} ` : "";
+    return `You work on the tab ${id}"${title}" (${browser.currentURI?.spec}).\n\nThe user's request: ${text}`;
   }
 
   #onStep(step) {
@@ -332,6 +364,60 @@ class LazyvimiumAgentService {
   }
 
   /**
+   * @param {string} id An agent id.
+   * @returns {string} The model the user picked for it, or "" for the one
+   *   the agent's own settings pick.
+   */
+  modelFor(id) {
+    return Services.prefs.getStringPref(`${PREF_MODEL}${id}`, "");
+  }
+
+  /**
+   * @param {string} id An agent id.
+   * @param {string} model "" goes back to the agent's own pick.
+   */
+  setModel(id, model) {
+    if (model) {
+      Services.prefs.setStringPref(`${PREF_MODEL}${id}`, model);
+    } else {
+      Services.prefs.clearUserPref(`${PREF_MODEL}${id}`);
+    }
+  }
+
+  #models = new Map();
+
+  /**
+   * The models an agent offers, as its CLI lists them. Asked once a session.
+   *
+   * @param {object} agent A detected agent.
+   * @param {object} [options]
+   * @param {boolean} [options.refresh]
+   * @returns {Promise<{id: string, name: string, detail?: string}[]>}
+   */
+  models(agent, { refresh = false } = {}) {
+    const driver = LAZYVIMIUM_DRIVERS[agent.id];
+    if (!driver?.models || !agent.path) {
+      return Promise.resolve([]);
+    }
+    if (refresh || !this.#models.has(agent.id)) {
+      const promise = driver
+        .models(async args =>
+          runForOutput(agent.path, args, {
+            ms: 30000,
+            environment: { PATH: await LazyvimiumAgentDetect.childPath() },
+          })
+        )
+        .catch(e => {
+          console.error(`Lazyvimium: listing ${agent.name}'s models failed`, e);
+          return [];
+        });
+      this.#models.set(agent.id, promise);
+      promise.then(models => !models.length && this.#models.delete(agent.id));
+    }
+    return this.#models.get(agent.id);
+  }
+
+  /**
    * Let an agent that needs it reach lazyvimium (Antigravity's MCP config).
    *
    * @param {object} agent A detected agent.
@@ -395,17 +481,30 @@ class LazyvimiumAgentService {
     const conversation = this.#conversations.get(browser);
     conversation?.stop();
     this.#conversations.delete(browser);
+    for (const tab of conversation?.tabs ?? []) {
+      if (this.#conversations.get(tab) == conversation) {
+        this.#conversations.delete(tab);
+      }
+    }
     return conversation;
   }
 
-  // The agent opened a tab of its own and works there from now on.
+  // The agent works on another tab from now on. The conversation stays on
+  // the tabs it worked on before, and comes to the new one unless that tab
+  // has a conversation of its own.
   retarget(conversation, browser) {
-    const old = conversation.browser;
+    if (browser == conversation.browser) {
+      return;
+    }
+    const driving = conversation.running;
     this.setDriving(conversation, false);
-    this.#conversations.delete(old);
-    this.#conversations.set(browser, conversation);
+    if (!this.#conversations.has(browser)) {
+      this.#conversations.set(browser, conversation);
+    }
     conversation.moveTo(browser);
-    this.setDriving(conversation, true);
+    if (driving) {
+      this.setDriving(conversation, true);
+    }
   }
 
   // The glow around the tab the agent works on, drawn over the page by its
@@ -423,21 +522,15 @@ class LazyvimiumAgentService {
   }
 }
 
-// One color per agent for its dot and the glow around the tab it drives.
-const AGENT_COLORS = {
-  claude: "#d97757",
-  codex: "#10a37f",
-  cursor: "#a3a3a3",
-  antigravity: "#4285f4",
-  opencode: "#f5a742",
-};
-
 /**
+ * One color per agent for its dot and the glow around the tab it drives,
+ * from lazyvimium's theme.
+ *
  * @param {string} id
  * @returns {string}
  */
 export function agentColor(id) {
-  return AGENT_COLORS[id] ?? "#82aaff";
+  return LazyvimiumTheme.agentColor(id);
 }
 
 export const LazyvimiumAgents = new LazyvimiumAgentService();

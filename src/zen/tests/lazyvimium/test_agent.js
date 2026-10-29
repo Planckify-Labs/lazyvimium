@@ -141,7 +141,7 @@ add_task(function test_claude_driver() {
   Assert.deepEqual(events, [
     { type: "session", id: "s2" },
     { type: "tool", name: "WebSearch", input: { query: "x" } },
-    { type: "text", text: "Opened it" },
+    { type: "text", text: "Opened it", final: true },
     { type: "session", id: "s2" },
     { type: "done", error: null },
   ]);
@@ -150,6 +150,127 @@ add_task(function test_claude_driver() {
       { type: "result", is_error: true, result: "Out of credit" },
     ]),
     [{ type: "done", error: "Out of credit" }]
+  );
+});
+
+add_task(function test_claude_streams_its_answer() {
+  ok(
+    LAZYVIMIUM_DRIVERS.claude
+      .launch(TURN)
+      .args.includes("--include-partial-messages")
+  );
+  const delta = text => ({
+    type: "stream_event",
+    event: {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text },
+    },
+  });
+  Assert.deepEqual(
+    parseAll("claude", [
+      { type: "stream_event", event: { type: "message_start" } },
+      delta("**Pri"),
+      delta("ce**"),
+      {
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          delta: { type: "input_json_delta", partial_json: "{" },
+        },
+      },
+    ]),
+    [
+      { type: "text", text: "**Pri", delta: true },
+      { type: "text", text: "ce**", delta: true },
+    ],
+    "the answer's pieces, without the tool input's"
+  );
+});
+
+add_task(function test_drivers_run_the_model_picked() {
+  for (const [id, flag] of [
+    ["claude", "--model"],
+    ["cursor", "--model"],
+    ["antigravity", "--model"],
+    ["opencode", "--model"],
+  ]) {
+    const { args } = LAZYVIMIUM_DRIVERS[id].launch({ ...TURN, model: "m1" });
+    Assert.equal(args[args.indexOf(flag) + 1], "m1", id);
+    ok(
+      !LAZYVIMIUM_DRIVERS[id].launch(TURN).args.includes(flag),
+      `${id} keeps its own model when none is picked`
+    );
+  }
+  const codex = LAZYVIMIUM_DRIVERS.codex.launch({
+    ...TURN,
+    model: "gpt-x",
+    resume: "t1",
+  }).args;
+  ok(
+    codex.indexOf('model="gpt-x"') < codex.indexOf("exec"),
+    "codex takes it as config, which exec resume takes too"
+  );
+});
+
+add_task(async function test_drivers_list_models() {
+  const run = stdout => async () => ({ stdout, exitCode: 0 });
+  // Recorded from agy, OpenCode and Codex on 2026-10-30.
+  Assert.deepEqual(
+    await LAZYVIMIUM_DRIVERS.antigravity.models(
+      run(
+        "Fetching available models...\ngemini-4-argon-high\tGemini 4 Argon (High)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n"
+      )
+    ),
+    [
+      { id: "gemini-4-argon-high", name: "Gemini 4 Argon (High)" },
+      { id: "claude-opus-5-5-low", name: "Claude Opus 5.5 (Low)" },
+    ]
+  );
+  Assert.deepEqual(
+    (
+      await LAZYVIMIUM_DRIVERS.opencode.models(
+        run("opencode/big-pickle\nanthropic/claude-sonnet-5-5\n")
+      )
+    ).map(model => model.id),
+    ["opencode/big-pickle", "anthropic/claude-sonnet-5-5"]
+  );
+  Assert.deepEqual(
+    await LAZYVIMIUM_DRIVERS.codex.models(
+      run(
+        JSON.stringify({
+          models: [
+            { slug: "hidden", visibility: "hide", priority: 0 },
+            {
+              slug: "gpt-b",
+              display_name: "GPT B",
+              visibility: "list",
+              priority: 2,
+            },
+            {
+              slug: "gpt-a",
+              display_name: "GPT A",
+              description: "Fast",
+              visibility: "list",
+              priority: 1,
+            },
+          ],
+        })
+      )
+    ),
+    [
+      { id: "gpt-a", name: "GPT A", detail: "Fast" },
+      { id: "gpt-b", name: "GPT B", detail: "" },
+    ]
+  );
+  Assert.deepEqual(
+    await LAZYVIMIUM_DRIVERS.codex.models(run("not json")),
+    [],
+    "an output it cannot read lists nothing"
+  );
+  Assert.deepEqual(
+    (await LAZYVIMIUM_DRIVERS.claude.models()).map(model => model.id),
+    ["opus", "sonnet", "haiku"]
   );
 });
 
@@ -516,7 +637,7 @@ echo '{"type":"result","is_error":false,"result":"ok","session_id":"fake-1"}'
 
   Assert.deepEqual(events, [
     { type: "session", id: "fake-1" },
-    { type: "text", text: "saw the page" },
+    { type: "text", text: "saw the page", final: true },
     { type: "session", id: "fake-1" },
     { type: "done", error: null },
   ]);

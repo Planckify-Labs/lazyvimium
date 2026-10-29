@@ -17,6 +17,21 @@
 - name: lazyvimium.agent.default
   value: "" # an agent id (claude, codex, cursor, antigravity, opencode); empty picks the first installed
 
+- name: lazyvimium.agent.layout
+  value: "float" # float over the page, slide in from the side and hide when the mouse leaves, or split beside the tab
+
+- name: lazyvimium.agent.side
+  value: "right" # the side the agent panel slides in from: left or right
+
+- name: lazyvimium.agent.width
+  value: 420 # the agent panel's width, in pixels
+
+- name: lazyvimium.agent.split-fallback
+  value: "float" # how a split agent panel lays out while the tab has no room for it: float or slide
+
+- name: lazyvimium.theme
+  value: "" # JSON overrides for lazyvimium's colors, see ui/LazyvimiumTheme.sys.mjs
+
 - name: lazyvimium.agent.log.enabled
   value: true # a JSONL trace per conversation in <profile>/lazyvimium/agent/logs, <leader>al opens it
 

@@ -15,10 +15,14 @@ firefox-appdir = "browser"
 
 ["test_keys.js"]
 
+["test_markdown.js"]
+
 ["test_plugins.js"]
 
 ["test_shared.js"]
 
 ["test_specs.js"]
+
+["test_theme.js"]
 
 ["test_which_key.js"]

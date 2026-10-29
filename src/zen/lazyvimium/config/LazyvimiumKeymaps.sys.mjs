@@ -111,6 +111,7 @@ export const LazyvimiumKeymapsSpec = {
     ["n", "<leader>aa", "agent.ask"],
     ["n", "<leader>ap", "agent.toggle"],
     ["n", "<leader>as", "agent.select"],
+    ["n", "<leader>am", "agent.model"],
     ["n", "<leader>ax", "agent.stop"],
     ["n", "<leader>an", "agent.new"],
     ["n", "<leader>al", "agent.log"],

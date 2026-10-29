@@ -42,6 +42,10 @@ const OWN_TOOLS = [
   "page_observe",
   "page_act",
   "page_navigate",
+  "tabs_list",
+  "tab_open",
+  "tab_switch",
+  "tab_close",
   "browser_action",
 ];
 
@@ -52,11 +56,12 @@ const QUIET_TOOLS = new Set(["ToolSearch", "call_mcp_tool"]);
 
 const STDERR_TAIL = 4000;
 
-export const BROWSER_INSTRUCTIONS = `You are working in the user's web browser, lazyvimium, on the tab they asked from. Use the "${MCP_SERVER_NAME}" tools to do what they ask:
-- page_observe reads the tab: its address, the visible text and the controls you can use, each with an id like e12.
-- page_act clicks, fills, selects, presses a key or scrolls, using an id from the latest observation, and returns the page after the action.
-- page_navigate opens an address; browser_action runs a browser command (tabs, history, reader mode and more).
-Observe before you act. Ids stay valid only while the element is unchanged; if a call says the page changed, observe again. Do not use shell, file or code tools for the task. Never enter passwords or payment details: ask the user to do that. When you are done, answer in a few sentences.`;
+export const BROWSER_INSTRUCTIONS = `You are working in the user's web browser, lazyvimium, starting on the tab they asked from. Use the "${MCP_SERVER_NAME}" tools to do what they ask:
+- page_observe reads a tab: its address, the visible text and the controls you can use, each with an id like e12.
+- page_act clicks, fills, selects, presses a key or scrolls, using an id from the tab's latest observation, and returns the page after the action.
+- page_navigate opens an address; browser_action runs a browser command (history, reader mode and more).
+- tabs_list shows the open tabs, each with an id like t3. tab_open opens a new tab, tab_switch moves you to another tab, tab_close closes one. The page tools work on the tab you are on, or on the one you name with tab.
+Prefer opening a tab of your own over leaving the user's page when a task needs another site, and close the tabs you opened once they are no longer needed. Observe before you act. Ids stay valid only while the element is unchanged; if a call says the page changed, observe again. Do not use shell, file or code tools for the task. Never enter passwords or payment details: ask the user to do that. When you are done, answer in a few sentences.`;
 
 function ownTool(name) {
   return typeof name == "string" && OWN_TOOLS.some(tool => name.endsWith(tool));
@@ -82,6 +87,8 @@ function tomlString(value) {
  * @property {string} dir The agent's working directory, private to the
  *   user, where config files go.
  * @property {string} runId Unique per turn, naming its private files.
+ * @property {string|null} [model] The model the user picked, or null for
+ *   the agent's own.
  */
 
 /**
@@ -90,6 +97,8 @@ function tomlString(value) {
  * @property {string} [id] For session: the agent's id to resume.
  * @property {string} [text] For text.
  * @property {boolean} [delta] For text: a piece of the current message.
+ * @property {boolean} [final] For text: the whole current message, which
+ *   replaces the pieces streamed so far.
  * @property {string} [name] For tool: one of the agent's own tools.
  * @property {*} [input] For tool: what the agent passed it.
  * @property {string|null} [error] For done.
@@ -113,6 +122,22 @@ function textBlocks(content) {
       return toolEvent(block.name, block.input);
     }
     return [];
+  });
+}
+
+// The models an agent lists one per line, the id first: agy prints
+// "id<TAB>Name", OpenCode "provider/model".
+function parseModelLines(stdout) {
+  return stdout.split("\n").flatMap(line => {
+    const [id, ...name] = line.trim().split(/\t|\s{2,}/);
+    if (
+      !id ||
+      !/^[\w][\w.:/@[\]-]*$/.test(id) ||
+      /^(?:Fetching|Available)/i.test(line.trim())
+    ) {
+      return [];
+    }
+    return [{ id, name: name.join(" ").trim() || id }];
   });
 }
 
@@ -170,6 +195,9 @@ export const LAZYVIMIUM_DRIVERS = {
           `mcp__${MCP_SERVER_NAME}`,
           "--append-system-prompt",
           BROWSER_INSTRUCTIONS,
+          // The answer as it is written, not once it is done.
+          "--include-partial-messages",
+          ...(turn.model ? ["--model", turn.model] : []),
           ...(turn.resume ? ["--resume", turn.resume] : []),
         ],
         files: [
@@ -189,7 +217,31 @@ export const LAZYVIMIUM_DRIVERS = {
         ],
       };
     },
-    parse: parseStreamJson,
+    parse(event) {
+      if (event.type == "stream_event") {
+        const { type, delta } = event.event ?? {};
+        return type == "content_block_delta" &&
+          delta?.type == "text_delta" &&
+          delta.text
+          ? [{ type: "text", text: delta.text, delta: true }]
+          : [];
+      }
+      // The whole message after its pieces: it settles what they built.
+      if (event.type == "assistant") {
+        return textBlocks(event.message?.content).map(item =>
+          item.type == "text" ? { ...item, final: true } : item
+        );
+      }
+      return parseStreamJson(event);
+    },
+    // Claude Code lists no models; its aliases follow the latest of each.
+    async models() {
+      return [
+        { id: "opus", name: "Opus", detail: "the latest Opus" },
+        { id: "sonnet", name: "Sonnet", detail: "the latest Sonnet" },
+        { id: "haiku", name: "Haiku", detail: "the latest Haiku" },
+      ];
+    },
   },
 
   codex: {
@@ -205,6 +257,8 @@ export const LAZYVIMIUM_DRIVERS = {
           `${server}.default_tools_approval_mode="approve"`,
           "-c",
           `sandbox_mode="read-only"`,
+          // As config, which `exec resume` takes too.
+          ...(turn.model ? ["-c", `model=${tomlString(turn.model)}`] : []),
           "exec",
           ...(turn.resume ? ["resume"] : []),
           "--json",
@@ -248,6 +302,22 @@ export const LAZYVIMIUM_DRIVERS = {
       }
       return [];
     },
+    // The catalog Codex picks from, without the models it hides.
+    async models(run) {
+      const { stdout } = await run(["debug", "models"]);
+      try {
+        return (JSON.parse(stdout).models ?? [])
+          .filter(model => model.slug && model.visibility != "hide")
+          .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+          .map(model => ({
+            id: model.slug,
+            name: model.display_name || model.slug,
+            detail: model.description ?? "",
+          }));
+      } catch {
+        return [];
+      }
+    },
   },
 
   cursor: {
@@ -259,6 +329,7 @@ export const LAZYVIMIUM_DRIVERS = {
           "stream-json",
           "--approve-mcps",
           "--trust",
+          ...(turn.model ? ["--model", turn.model] : []),
           ...(turn.resume ? ["--resume", turn.resume] : []),
           withInstructions(turn),
         ],
@@ -278,6 +349,10 @@ export const LAZYVIMIUM_DRIVERS = {
       };
     },
     parse: parseStreamJson,
+    // Unverified: cursor-agent was not installed when this was written.
+    async models(run) {
+      return parseModelLines((await run(["models"])).stdout);
+    },
   },
 
   // Antigravity's agy reads MCP servers from its global config only, and
@@ -293,9 +368,13 @@ export const LAZYVIMIUM_DRIVERS = {
           "--output-format",
           "stream-json",
           "--dangerously-skip-permissions",
+          ...(turn.model ? ["--model", turn.model] : []),
           ...(turn.resume ? ["--conversation", turn.resume] : []),
         ],
       };
+    },
+    async models(run) {
+      return parseModelLines((await run(["models"])).stdout);
     },
     parse(event) {
       switch (event.event) {
@@ -361,6 +440,7 @@ export const LAZYVIMIUM_DRIVERS = {
           "run",
           "--format",
           "json",
+          ...(turn.model ? ["--model", turn.model] : []),
           ...(turn.resume ? ["--session", turn.resume] : []),
           withInstructions(turn),
         ],
@@ -414,6 +494,12 @@ export const LAZYVIMIUM_DRIVERS = {
           ];
       }
       return session;
+    },
+    // provider/model, for every provider the user has signed in to.
+    async models(run) {
+      return parseModelLines((await run(["models"])).stdout).filter(model =>
+        model.id.includes("/")
+      );
     },
   },
 };

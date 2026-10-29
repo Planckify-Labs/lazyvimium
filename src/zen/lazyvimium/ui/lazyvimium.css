@@ -23,8 +23,8 @@
 /* The explorer's cursor and selection over the sidebar's rows, in the
    statusline's EXPLORER and VISUAL colors. */
 :root[lazyvimium-explorer] {
-  --lazyvimium-explorer-color: #82aaff;
-  --lazyvimium-visual-color: #c099ff;
+  --lazyvimium-explorer-color: var(--lazyvimium-mode-e);
+  --lazyvimium-visual-color: var(--lazyvimium-mode-v);
 
   & .tabbrowser-tab:is([lazyvimium-cursor], [lazyvimium-selected]) > .tab-stack > .tab-background,
   & .tab-group-label-container:is([lazyvimium-cursor], [lazyvimium-selected]) {
@@ -54,7 +54,7 @@
 /* The toolbar's cursor over the top bar's buttons and urlbar, in the
    statusline's TOOLBAR color. */
 :root[lazyvimium-toolbar] :is(toolbarbutton, #urlbar-container)[lazyvimium-cursor] {
-  outline: 2px solid #ffc777;
+  outline: 2px solid var(--lazyvimium-mode-t);
   outline-offset: -2px;
   border-radius: var(--border-radius-medium, 6px);
 }
@@ -62,7 +62,7 @@
 /* The library's cursor over a section's rows, the media grid, the spaces'
    headers and tabs and the filter panel, in the statusline's LIBRARY color. */
 :root[lazyvimium-library] zen-library {
-  --lazyvimium-library-color: #4fd6be;
+  --lazyvimium-library-color: var(--lazyvimium-mode-l);
 
   & [lazyvimium-cursor]:not(tab),
   & tab[lazyvimium-cursor] > .tab-stack > .tab-background {
@@ -129,7 +129,7 @@
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background-color: light-dark(#ffffff, #1b1d2b);
+      background-color: light-dark(#ffffff, var(--lazyvimium-ink));
       transition: translate 0.15s ease-out;
     }
   }
@@ -140,11 +140,11 @@
     }
 
     & .lazyvimium-vim-mode-track {
-      background-color: #fca7ea;
+      background-color: var(--lazyvimium-mode-n);
 
       & > span {
         translate: 12px 0;
-        background-color: #1b1d2b;
+        background-color: light-dark(#ffffff, var(--lazyvimium-ink));
       }
     }
   }
@@ -179,8 +179,8 @@
     z-index: 2;
     padding: 0 5px;
     border-radius: 4px;
-    background: #a25772;
-    color: #eef5ff;
+    background: var(--lazyvimium-hint);
+    color: var(--lazyvimium-hint-text);
     font: 700 11px/16px ui-monospace, monospace;
     pointer-events: none;
   }
@@ -188,9 +188,7 @@
 
 /* Floating UI uses the glass of Zen's floating urlbar (zen-omnibox.css). */
 #lazyvimium-picker,
-#lazyvimium-which-key,
-#lazyvimium-agent-dock,
-#lazyvimium-agent-pill {
+#lazyvimium-which-key {
   --lazyvimium-glass-background: light-dark(rgb(255, 255, 255), rgb(24 24 24));
 
   position: fixed;
@@ -217,7 +215,7 @@
 
 /* stylelint-disable-next-line media-query-no-invalid */
 @media -moz-pref("zen.theme.acrylic-urlbar") and (not (prefers-reduced-transparency: reduce)) {
-  :root:not([zen-no-acrylic="true"]) :is(#lazyvimium-picker, #lazyvimium-which-key, #lazyvimium-agent-dock, #lazyvimium-agent-pill) {
+  :root:not([zen-no-acrylic="true"]) :is(#lazyvimium-picker, #lazyvimium-which-key) {
     backdrop-filter: var(--zen-backdrop-underlay) blur(40px);
 
     &:not(:-moz-window-inactive) {
@@ -278,7 +276,7 @@
 
 .lazyvimium-which-key-key {
   justify-self: end;
-  color: light-dark(#b15c00, #ff9e64);
+  color: var(--lazyvimium-which-key-key);
   font: 700 12px/18px ui-monospace, monospace;
 }
 
@@ -294,7 +292,7 @@
   line-height: 18px;
 
   [group] > & {
-    color: light-dark(#6d28d9, #bb9af7);
+    color: var(--lazyvimium-which-key-group);
   }
 }
 
@@ -334,8 +332,8 @@
   min-width: 18px;
   padding: 0 5px;
   border-radius: 5px;
-  background-color: #a25772;
-  color: #eef5ff;
+  background-color: var(--lazyvimium-hint);
+  color: var(--lazyvimium-hint-text);
   font: 700 12px/18px ui-monospace, monospace;
   text-align: center;
 }
@@ -368,35 +366,215 @@
   opacity: 0.55;
 }
 
-/* The agent dock, at the foot of the tab and clear of the corners the
-   statusline and which-key take. */
-#lazyvimium-agent-dock {
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  width: min(680px, calc(100vw - 32px));
-  max-height: 70vh;
-  padding: 0;
+/* The agent panel, a glass panel at the side of the tab in lazyvimium's
+   colors (LazyvimiumTheme.sys.mjs). Its own surface and text colors, not
+   the space theme's, keep its text readable over any page, in any layout
+   and vim mode color. */
+#lazyvimium-agent-dock,
+#lazyvimium-agent-pill {
+  --lazyvimium-agent-glass: color-mix(in srgb, var(--lazyvimium-agent-surface) var(--lazyvimium-glass-opacity, 78%), transparent);
+
+  position: absolute;
   z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  background-color: var(--lazyvimium-agent-glass);
+  backdrop-filter: blur(var(--lazyvimium-glass-blur, 40px)) saturate(160%);
+  box-shadow:
+    0 24px 80px -24px light-dark(rgba(31, 35, 53, 0.45), rgba(0, 0, 0, 0.7)),
+    inset 0 0 0 0.5px light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
+  outline: 0.5px solid color-mix(in srgb, var(--lazyvimium-agent-border) 80%, transparent);
+  color: var(--lazyvimium-agent-text);
+  font: menu;
+  font-size: 13px;
+
+  &[hidden] {
+    display: none;
+  }
+
+  /* Without glass (Zen's software rendering, the user's settings) the
+     surface is solid. */
+  :root[zen-no-acrylic="true"] & {
+    background-color: var(--lazyvimium-agent-surface);
+    backdrop-filter: none;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--lazyvimium-agent-surface);
+    backdrop-filter: none;
+  }
+}
+
+/* float: a card over the page, inset from its side. */
+#lazyvimium-agent-dock {
+  top: 10px;
+  bottom: 10px;
+  width: var(--lazyvimium-agent-width, 420px);
+  max-width: calc(100% - 20px);
+  border-radius: 16px;
   overflow: hidden;
+
+  &[side="right"] {
+    right: 10px;
+  }
+
+  &[side="left"] {
+    left: 10px;
+  }
+
+  /* slide: against the page's side, as Zen's compact sidebar. */
+  &[layout="slide"] {
+    top: 0;
+    bottom: 0;
+    border-radius: var(--zen-native-inner-radius, 10px);
+
+    &[side="right"] {
+      right: 0;
+    }
+
+    &[side="left"] {
+      left: 0;
+    }
+  }
+
+  /* split: beside the tab, which makes room, as a split view pane. */
+  &[layout="split"] {
+    position: relative;
+    inset: auto;
+    flex: none;
+    order: 1;
+    max-width: none;
+    margin-inline-start: var(--zen-element-separation, 8px);
+    border-radius: var(--zen-native-inner-radius, 10px);
+    box-shadow: var(--zen-big-shadow, none);
+    /* Its size is the tab box's height and its own width, never its
+       content's: a long conversation would otherwise stretch the tab box
+       past the window. */
+    contain: size;
+
+    &[side="left"] {
+      order: -1;
+      margin-inline: 0 var(--zen-element-separation, 8px);
+    }
+  }
+}
+
+.lazyvimium-agent-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 10px 8px 14px;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--lazyvimium-agent-border) 70%, transparent);
+  font-size: 12px;
+}
+
+.lazyvimium-agent-spacer {
+  flex: 1;
+}
+
+.lazyvimium-agent-layouts {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--lazyvimium-raised) 70%, transparent);
+}
+
+.lazyvimium-agent-icon-button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  -moz-context-properties: fill;
+  fill: var(--lazyvimium-agent-muted);
+  color: inherit;
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 10%, transparent);
+    fill: var(--lazyvimium-agent-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--lazyvimium-accent);
+    outline-offset: -2px;
+  }
+
+  &[aria-pressed="true"] {
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 24%, transparent);
+    fill: var(--lazyvimium-accent);
+  }
+
+  &.layout-float {
+    background-image: url("chrome://browser/skin/zen-icons/popup.svg");
+  }
+
+  &.layout-slide {
+    background-image: url("chrome://browser/skin/zen-icons/sidebar-right.svg");
+  }
+
+  &.layout-split {
+    background-image: url("chrome://browser/skin/zen-icons/split.svg");
+
+    /* Picked, but floating while the tab has no room for it. */
+    #lazyvimium-agent-dock[fallback] &[aria-pressed="true"] {
+      background-color: color-mix(in srgb, var(--lazyvimium-warning) 22%, transparent);
+      fill: var(--lazyvimium-warning);
+    }
+  }
+
+  &.side {
+    background-image: url("chrome://browser/skin/zen-icons/arrow-left.svg");
+
+    &[side="left"] {
+      background-image: url("chrome://browser/skin/zen-icons/arrow-right.svg");
+    }
+  }
+
+  &.close {
+    background-image: url("chrome://browser/skin/zen-icons/close.svg");
+  }
 }
 
 .lazyvimium-agent-log {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px 10px;
+  gap: 10px;
+  padding: 14px 16px 12px;
   overflow-y: auto;
   min-height: 0;
   flex: 1;
+  scrollbar-width: thin;
+}
 
-  &[hidden] {
-    display: none;
-  }
+.lazyvimium-agent-empty {
+  margin: auto 8px;
+  text-align: center;
+}
+
+.lazyvimium-agent-empty-title {
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lazyvimium-accent);
+}
+
+.lazyvimium-agent-empty-detail {
+  line-height: 1.45;
+  color: var(--lazyvimium-agent-muted);
 }
 
 .lazyvimium-agent-message {
-  line-height: 1.45;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
@@ -404,9 +582,14 @@
   &[type="user"] {
     align-self: flex-end;
     max-width: 85%;
-    padding: 6px 11px;
+    padding: 7px 12px;
     border-radius: 14px 14px 4px 14px;
-    background-color: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-user) 20%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-user) 40%, transparent);
+  }
+
+  &[type="agent"] {
+    white-space: normal;
   }
 
   &:is([type="step"], [type="tool"]) {
@@ -414,7 +597,7 @@
     gap: 8px;
     align-items: baseline;
     font-size: 12px;
-    opacity: 0.75;
+    color: var(--lazyvimium-agent-muted);
   }
 
   &[type="tool"] {
@@ -425,11 +608,11 @@
   &[type="note"] {
     align-self: center;
     font-size: 11px;
-    opacity: 0.55;
+    color: var(--lazyvimium-agent-muted);
   }
 
   &[type="error"] {
-    color: light-dark(#c4314b, #ff757f);
+    color: var(--lazyvimium-error);
   }
 
   &[type="confirm"] {
@@ -439,7 +622,173 @@
     align-items: center;
     padding: 8px 10px;
     border-radius: 10px;
-    background-color: color-mix(in srgb, #ffc777 18%, transparent);
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-confirm) 18%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-confirm) 50%, transparent);
+  }
+}
+
+/* The agent's answers, in Markdown, each part in its theme color. */
+.lazyvimium-md {
+  & > :first-child {
+    margin-top: 0;
+  }
+
+  & > :last-child {
+    margin-bottom: 0;
+  }
+
+  & :is(p, ul, ol, pre, blockquote, .lazyvimium-md-table) {
+    margin: 0 0 8px;
+  }
+
+  & :is(h1, h2, h3, h4, h5, h6) {
+    margin: 14px 0 6px;
+    font-size: 1em;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  & h1 {
+    font-size: 1.3em;
+    color: var(--lazyvimium-md-h1);
+  }
+
+  & h2 {
+    font-size: 1.15em;
+    color: var(--lazyvimium-md-h2);
+  }
+
+  & h3 {
+    font-size: 1.05em;
+    color: var(--lazyvimium-md-h3);
+  }
+
+  & h4 {
+    color: var(--lazyvimium-md-h4);
+  }
+
+  & h5 {
+    color: var(--lazyvimium-md-h5);
+  }
+
+  & h6 {
+    color: var(--lazyvimium-md-h6);
+  }
+
+  & strong {
+    font-weight: 700;
+    color: var(--lazyvimium-md-strong);
+  }
+
+  & em {
+    color: var(--lazyvimium-md-em);
+  }
+
+  & del {
+    color: var(--lazyvimium-agent-muted);
+  }
+
+  & a {
+    color: var(--lazyvimium-md-link);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--lazyvimium-md-link) 45%, transparent);
+    text-underline-offset: 2px;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration-color: currentColor;
+    }
+  }
+
+  & code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background-color: color-mix(in srgb, var(--lazyvimium-md-code-background) 85%, transparent);
+    color: var(--lazyvimium-md-code);
+    font: 0.92em/1.4 ui-monospace, monospace;
+  }
+
+  & pre {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border-inline-start: 2px solid var(--lazyvimium-accent);
+    background-color: color-mix(in srgb, var(--lazyvimium-md-code-background) 85%, transparent);
+    overflow-x: auto;
+    scrollbar-width: thin;
+
+    &[data-lang]::before {
+      content: attr(data-lang);
+      display: block;
+      margin-bottom: 6px;
+      color: var(--lazyvimium-agent-muted);
+      font: 600 10px/1 ui-monospace, monospace;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    & code {
+      padding: 0;
+      background: none;
+      color: var(--lazyvimium-agent-text);
+      white-space: pre;
+    }
+  }
+
+  & :is(ul, ol) {
+    padding-inline-start: 20px;
+  }
+
+  & li {
+    margin: 3px 0;
+
+    & > p {
+      margin: 0;
+    }
+
+    & > :is(ul, ol) {
+      margin: 3px 0 0;
+    }
+
+    &::marker {
+      color: var(--lazyvimium-md-bullet);
+    }
+  }
+
+  & ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  & blockquote {
+    padding-inline-start: 10px;
+    border-inline-start: 3px solid var(--lazyvimium-md-quote);
+    color: var(--lazyvimium-agent-muted);
+  }
+
+  & hr {
+    margin: 12px 0;
+    border: none;
+    border-top: 1px solid var(--lazyvimium-md-rule);
+  }
+
+  & .lazyvimium-md-table {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  & table {
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  & :is(th, td) {
+    padding: 4px 8px;
+    border: 1px solid var(--lazyvimium-md-rule);
+    text-align: start;
+  }
+
+  & th {
+    color: var(--lazyvimium-md-table-head);
+    font-weight: 700;
   }
 }
 
@@ -453,16 +802,16 @@
   }
 
   [status="done"] > & {
-    color: light-dark(#2f855a, #c3e88d);
+    color: var(--lazyvimium-success);
   }
 
   [status="failed"] > & {
-    color: light-dark(#c4314b, #ff757f);
+    color: var(--lazyvimium-error);
   }
 }
 
 .lazyvimium-agent-step-detail {
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
 @keyframes lazyvimium-agent-spin {
@@ -475,24 +824,20 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 14px 10px;
-  border-top: 0.5px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.1));
+  margin: 0 10px 10px;
+  padding: 10px 12px 8px;
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--lazyvimium-raised) 55%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-border) 80%, transparent);
 
-  .lazyvimium-agent-log[hidden] + & {
-    border-top: none;
+  &:focus-within {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lazyvimium-accent) 70%, transparent);
   }
-}
-
-.lazyvimium-agent-chips {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-size: 12px;
 }
 
 .lazyvimium-agent-chip {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   padding: 2px 9px 2px 7px;
@@ -516,18 +861,41 @@
   }
 }
 
+.lazyvimium-agent-model {
+  min-width: 0;
+  max-width: 160px;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 0.5px solid var(--lazyvimium-agent-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lazyvimium-agent-muted);
+  font: 500 11px/16px ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: var(--lazyvimium-accent);
+    color: var(--lazyvimium-agent-text);
+  }
+
+  &[hidden] {
+    display: none;
+  }
+}
+
 .lazyvimium-agent-tab {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.6;
+  font-size: 11px;
+  color: var(--lazyvimium-agent-muted);
 }
 
 .lazyvimium-agent-status {
   font-variant-numeric: tabular-nums;
-  opacity: 0.7;
+  color: var(--lazyvimium-agent-muted);
 }
 
 .lazyvimium-agent-input {
@@ -543,16 +911,21 @@
   font: inherit;
   font-size: 14px;
   line-height: 20px;
+
+  &::placeholder {
+    color: var(--lazyvimium-agent-muted);
+    opacity: 1;
+  }
 }
 
 .lazyvimium-agent-hint {
   font-size: 11px;
-  opacity: 0.5;
+  color: var(--lazyvimium-agent-muted);
 }
 
 .lazyvimium-agent-button {
   padding: 3px 10px;
-  border: 0.5px solid light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  border: 0.5px solid var(--lazyvimium-agent-border);
   border-radius: 8px;
   background: transparent;
   color: inherit;
@@ -561,8 +934,9 @@
 
   &.primary {
     border-color: transparent;
-    background-color: var(--zen-primary-color, AccentColor);
-    color: var(--button-text-color-primary, AccentColorText);
+    background-color: var(--lazyvimium-accent);
+    color: light-dark(#ffffff, var(--lazyvimium-ink));
+    font-weight: 600;
   }
 }
 
@@ -615,6 +989,54 @@
   }
 }
 
+/* The slid-out panel's edge, a strip along the page's side with a bar in
+   the agent's color; resting the mouse on it slides the panel back in. */
+#lazyvimium-agent-handle {
+  position: absolute;
+  z-index: 2147483646;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+
+  &[side="right"] {
+    right: -4px;
+  }
+
+  &[side="left"] {
+    left: -4px;
+  }
+
+  &[hidden] {
+    display: none;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    inset-inline-start: 3px;
+    width: 4px;
+    height: 56px;
+    border-radius: 2px;
+    background-color: var(--lazyvimium-agent-color);
+    opacity: 0.6;
+    translate: 0 -50%;
+    transition:
+      height 0.15s ease-out,
+      opacity 0.15s ease-out;
+  }
+
+  &:hover::before,
+  &[unseen]::before {
+    height: 88px;
+    opacity: 1;
+  }
+
+  &[running]::before {
+    animation: lazyvimium-agent-pulse 1.2s ease-in-out infinite;
+  }
+}
+
 @keyframes lazyvimium-agent-pulse {
   50% {
     opacity: 0.35;
@@ -638,7 +1060,9 @@
   .lazyvimium-agent-step-icon,
   .lazyvimium-agent-chip::before,
   #lazyvimium-agent-pill::before,
+  #lazyvimium-agent-handle::before,
   .browserStack[lazyvimium-agent-driving]::after {
     animation: none !important;
+    transition: none !important;
   }
 }

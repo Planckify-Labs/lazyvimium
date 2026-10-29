@@ -54,14 +54,17 @@ async function openPage() {
 
 function toolbox(tab, { confirm = async () => false } = {}) {
   const steps = [];
+  let working = tab.linkedBrowser;
   const box = new LazyvimiumAgentToolbox({
     lazyvimium: Lazyvimium,
-    browser: () => tab.linkedBrowser,
-    retarget() {},
+    browser: () => working,
+    retarget(browser) {
+      working = browser;
+    },
     onStep: step => steps.push({ ...step }),
     confirm,
   });
-  return { box, steps };
+  return { box, steps, working: () => working };
 }
 
 function idOf(observation, pattern) {
@@ -332,7 +335,10 @@ add_task(async function test_dock_asks_the_agent_about_the_tab() {
     "<leader>aa comes back to the dock"
   );
   EventUtils.synthesizeKey("KEY_Escape");
-  ok(dockElement.hidden, "Escape closes it");
+  await TestUtils.waitForCondition(
+    () => dockElement.hidden,
+    "Escape closes it, once it has slid out"
+  );
   ok(
     document.getElementById("lazyvimium-agent-pill").hidden,
     "nothing is waiting"
@@ -362,6 +368,351 @@ add_task(async function test_dock_asks_the_agent_about_the_tab() {
   );
 
   LazyvimiumAgents.reset(browser);
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_agent_works_across_tabs() {
+  const tab = await openPage();
+  const questions = [];
+  const { box, working } = toolbox(tab, {
+    confirm: async question => {
+      questions.push(question);
+      return false;
+    },
+  });
+  const tabId = text => text.match(/^Tab: (t\d+)/m)?.[1];
+
+  const first = await box.callTool("page_observe", {});
+  const home = tabId(first.text);
+  ok(home, "every observation names its tab");
+  let list = await box.callTool("tabs_list", {});
+  ok(
+    list.text.includes(`[${home}] "Agent page"`) &&
+      list.text.includes("in front, you work on it"),
+    list.text
+  );
+
+  // A tab of its own, brought to the front.
+  const opened = await box.callTool("tab_open", {
+    url: ROOT + "file_agent_next.html",
+  });
+  ok(!opened.isError, opened.text);
+  ok(opened.text.includes("Title: Next page"), "it returns the loaded page");
+  const own = tabId(opened.text.split("\n\n")[1]);
+  Assert.notEqual(own, home);
+  Assert.equal(gBrowser.selectedBrowser, working(), "and works on it");
+
+  // The user's tab, now behind, is still in reach.
+  const goId = idOf(first.text, 'button "Go"');
+  const clicked = await box.callTool("page_act", {
+    action: "click",
+    element: goId,
+    tab: home,
+  });
+  ok(!clicked.isError, clicked.text);
+  Assert.equal(
+    await content(tab.linkedBrowser, "#out"),
+    "went",
+    "a click lands in a tab behind the one in front"
+  );
+  Assert.notEqual(gBrowser.selectedTab, tab, "without bringing it forward");
+
+  // Back to the user's tab without showing it, then to the front.
+  let switched = await box.callTool("tab_switch", { tab: home, show: false });
+  ok(!switched.isError, switched.text);
+  Assert.equal(working(), tab.linkedBrowser);
+  Assert.notEqual(gBrowser.selectedTab, tab);
+  switched = await box.callTool("tab_switch", { tab: home });
+  Assert.equal(gBrowser.selectedTab, tab, "show brings it to the front");
+
+  // In the background, then closed without asking: the agent opened it.
+  const background = await box.callTool("tab_open", { background: true });
+  const empty = background.text.match(/tab (t\d+)/)[1];
+  Assert.equal(gBrowser.selectedTab, tab, "a background tab stays behind");
+  list = await box.callTool("tabs_list", {});
+  ok(list.text.includes(`[${empty}]`) && list.text.includes("you opened it"));
+  const before = gBrowser.tabs.length;
+  const closed = await box.callTool("tab_close", { tab: empty });
+  ok(!closed.isError, closed.text);
+  Assert.equal(gBrowser.tabs.length, before - 1);
+  Assert.deepEqual(questions, [], "closing its own tab asks nothing");
+  Assert.equal(
+    working(),
+    gBrowser.selectedBrowser,
+    "closing the tab it works on moves it to the one in front"
+  );
+
+  // The user's tab is the user's to close.
+  const declined = await box.callTool("tab_close", { tab: home });
+  ok(declined.isError);
+  Assert.deepEqual(questions, ['close the tab "Agent page"']);
+  ok(gBrowser.tabs.includes(tab), "it stays open");
+
+  const missing = await box.callTool("page_observe", { tab: "t9999" });
+  ok(missing.isError && missing.text.includes("tabs_list"), missing.text);
+
+  await box.callTool("tab_close", { tab: own });
+  BrowserTestUtils.removeTab(tab);
+});
+
+// An agent printing the given stream-json lines; "sleep N" pauses.
+async function scriptedAgent(lines) {
+  const dir = await IOUtils.createUniqueDirectory(
+    PathUtils.tempDir,
+    "lzv-agent"
+  );
+  const script = PathUtils.join(dir, "claude");
+  const body = lines
+    .map(line =>
+      typeof line == "string"
+        ? line
+        : `printf '%s\\n' '${JSON.stringify(line).replaceAll("'", "'\\''")}'`
+    )
+    .join("\n");
+  await IOUtils.writeUTF8(script, `#!/bin/sh\n${body}\n`);
+  await IOUtils.setPermissions(script, 0o755);
+  registerCleanupFunction(() => IOUtils.remove(dir, { recursive: true }));
+  const agent = { id: "claude", name: "Fake Claude", path: script };
+  const original = LazyvimiumAgents.defaultAgent;
+  LazyvimiumAgents.defaultAgent = async () => agent;
+  registerCleanupFunction(() => {
+    LazyvimiumAgents.defaultAgent = original;
+  });
+  return agent;
+}
+
+function delta(text) {
+  return {
+    type: "stream_event",
+    event: { type: "content_block_delta", delta: { type: "text_delta", text } },
+  };
+}
+
+const dock = () => Lazyvimium.agentDockFor(window);
+const dockElement = () => document.getElementById("lazyvimium-agent-dock");
+
+async function openDock(tab) {
+  await dock().open(tab.linkedBrowser);
+  const input = dockElement().querySelector(".lazyvimium-agent-input");
+  await TestUtils.waitForCondition(
+    () => document.activeElement == input,
+    "the dock has the keys"
+  );
+  return input;
+}
+
+async function closeDock() {
+  dock().close();
+  await TestUtils.waitForCondition(() => dockElement().hidden, "it closed");
+}
+
+add_task(async function test_answers_render_as_markdown_as_they_stream() {
+  const answer =
+    "## Levels\n- **Resistance** $93\n- Support `90`\n\n[docs](https://example.com/)";
+  const cut = answer.indexOf("tance");
+  await scriptedAgent([
+    { type: "system", subtype: "init", session_id: "md-1" },
+    delta(answer.slice(0, cut)),
+    "sleep 2",
+    delta(answer.slice(cut)),
+    {
+      type: "assistant",
+      message: { content: [{ type: "text", text: answer }] },
+    },
+    { type: "result", is_error: false, session_id: "md-1" },
+  ]);
+  const tab = await openPage();
+  const input = await openDock(tab);
+  input.value = "levels?";
+  EventUtils.synthesizeKey("KEY_Enter");
+
+  const answerRow = () =>
+    dockElement().querySelector('.lazyvimium-agent-message[type="agent"]');
+  await TestUtils.waitForCondition(
+    () => answerRow()?.hasAttribute("streaming"),
+    "the answer shows while it streams"
+  );
+  const row = answerRow();
+  Assert.equal(row.querySelector("h2")?.textContent, "Levels");
+  Assert.equal(
+    row.querySelector("li strong")?.textContent,
+    "Resis",
+    "an emphasis still open shows as emphasis, not as **"
+  );
+  ok(!row.textContent.includes("**"), row.textContent);
+
+  await TestUtils.waitForCondition(
+    () => !LazyvimiumAgents.conversationFor(tab.linkedBrowser).running,
+    "the turn ends"
+  );
+  await TestUtils.waitForCondition(
+    () => !answerRow().hasAttribute("streaming"),
+    "and the answer settles"
+  );
+  Assert.equal(answerRow(), row, "in the row it streamed into");
+  Assert.deepEqual(
+    [...row.querySelectorAll("li")].map(li => li.textContent),
+    ["Resistance $93", "Support 90"]
+  );
+  Assert.equal(row.querySelector("li code").textContent, "90");
+  Assert.equal(
+    dockElement().querySelectorAll('.lazyvimium-agent-message[type="agent"]')
+      .length,
+    1,
+    "the whole message replaced its pieces"
+  );
+
+  const link = row.querySelector("a");
+  Assert.equal(link.href, "https://example.com/");
+  const opened = BrowserTestUtils.waitForNewTab(
+    gBrowser,
+    "https://example.com/"
+  );
+  EventUtils.synthesizeMouseAtCenter(link, {});
+  BrowserTestUtils.removeTab(await opened);
+  Assert.equal(
+    document.location.href,
+    AppConstants.BROWSER_CHROME_URL,
+    "the link opened in a tab, not over the browser"
+  );
+
+  await closeDock();
+  LazyvimiumAgents.reset(tab.linkedBrowser);
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_insert_mode_keys_in_the_dock() {
+  await scriptedAgent([]);
+  const tab = await openPage();
+  const tabs = gBrowser.tabs.length;
+  const input = await openDock(tab);
+  EventUtils.sendString("hello brave world");
+  EventUtils.synthesizeKey("w", { ctrlKey: true });
+  Assert.equal(input.value, "hello brave ", "Ctrl+W deletes a word");
+  Assert.equal(gBrowser.tabs.length, tabs, "and leaves the tab open");
+  EventUtils.synthesizeKey("h", { ctrlKey: true });
+  Assert.equal(input.value, "hello brave", "Ctrl+H a character");
+  EventUtils.synthesizeKey("u", { ctrlKey: true });
+  Assert.equal(input.value, "", "Ctrl+U the line");
+  await closeDock();
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_dock_layouts() {
+  await scriptedAgent([]);
+  registerCleanupFunction(async () => {
+    // The side button sets the pref itself.
+    Services.prefs.clearUserPref("lazyvimium.agent.layout");
+    Services.prefs.clearUserPref("lazyvimium.agent.side");
+    if (!dockElement().hidden) {
+      await closeDock();
+    }
+  });
+  const tab = await openPage();
+  const panels = gBrowser.tabpanels;
+  const fullWidth = panels.getBoundingClientRect().width;
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["lazyvimium.agent.layout", "split"],
+      ["lazyvimium.agent.width", 360],
+    ],
+  });
+  await openDock(tab);
+  const root = dockElement();
+  Assert.equal(root.parentNode.id, "zen-tabbox-wrapper");
+  if (fullWidth - 360 >= 440) {
+    Assert.equal(root.getAttribute("layout"), "split");
+    await TestUtils.waitForCondition(
+      () => panels.getBoundingClientRect().width < fullWidth - 300,
+      "the tab makes room beside it"
+    );
+    // From dev testing: a long conversation stretched the tab box past the
+    // window, hiding the close button and the request box.
+    const conversation = LazyvimiumAgents.conversationFor(tab.linkedBrowser);
+    for (let i = 0; i < 80; i++) {
+      conversation.messages.push({
+        type: "step",
+        text: `Read the page, a long step title number ${i} that wraps around the panel`,
+        status: "done",
+      });
+    }
+    conversation.changed();
+    await TestUtils.waitForCondition(
+      () => root.querySelectorAll(".lazyvimium-agent-message").length >= 80,
+      "the conversation is drawn"
+    );
+    await Promise.all(
+      root.getAnimations().map(animation => animation.finished)
+    );
+    const wrapper = root.parentNode.getBoundingClientRect();
+    const panel = root.getBoundingClientRect();
+    const close = root.querySelector(".close").getBoundingClientRect();
+    const composer = root
+      .querySelector(".lazyvimium-agent-composer")
+      .getBoundingClientRect();
+    info(JSON.stringify({ wrapper, panel, close, composer, h: innerHeight }));
+    Assert.lessOrEqual(wrapper.bottom, innerHeight, "the tab box fits");
+    Assert.lessOrEqual(panel.right, wrapper.right + 1, "so does the panel");
+    Assert.lessOrEqual(panel.bottom, wrapper.bottom + 1);
+    Assert.lessOrEqual(close.right, panel.right, "its close button shows");
+    Assert.equal(close.width, 24, "whole");
+    Assert.lessOrEqual(composer.bottom, panel.bottom, "and its request box");
+    Assert.greater(composer.height, 30);
+    conversation.messages.length = 0;
+    conversation.changed();
+
+    EventUtils.synthesizeKey("KEY_Escape");
+    Assert.equal(
+      document.activeElement,
+      tab.linkedBrowser,
+      "Escape goes back to the page"
+    );
+    ok(!root.hidden, "and the panel stays beside it");
+  }
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["lazyvimium.agent.width", Math.ceil(fullWidth)]],
+  });
+  Assert.equal(
+    root.getAttribute("layout"),
+    "float",
+    "with no room beside the tab it floats"
+  );
+  ok(root.hasAttribute("fallback"));
+  Assert.equal(
+    root.querySelector(".layout-split").getAttribute("aria-pressed"),
+    "true",
+    "split stays picked"
+  );
+
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["lazyvimium.agent.width", 360],
+      ["lazyvimium.agent.layout", "float"],
+      ["lazyvimium.agent.side", "left"],
+    ],
+  });
+  Assert.equal(root.getAttribute("side"), "left");
+  root.querySelector(".side").click();
+  Assert.equal(
+    Services.prefs.getStringPref("lazyvimium.agent.side"),
+    "right",
+    "the side button moves it across"
+  );
+  root.querySelector(".layout-slide").click();
+  Assert.equal(root.getAttribute("layout"), "slide");
+
+  // Slid in, it hides once the mouse leaves it.
+  await Promise.all(root.getAnimations().map(animation => animation.finished));
+  EventUtils.synthesizeMouseAtCenter(root, { type: "mousemove" });
+  EventUtils.synthesizeMouse(panels, 20, 20, { type: "mousemove" });
+  await TestUtils.waitForCondition(
+    () => root.hidden,
+    "the slid-in panel hides when the mouse leaves"
+  );
+  await SpecialPowers.popPrefEnv();
+  await SpecialPowers.popPrefEnv();
+  await SpecialPowers.popPrefEnv();
   BrowserTestUtils.removeTab(tab);
 });
 

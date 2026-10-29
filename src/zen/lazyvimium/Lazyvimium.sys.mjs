@@ -45,6 +45,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource:///modules/lazyvimium/ui/LazyvimiumLibraryView.sys.mjs",
   LazyvimiumMenuKeys:
     "resource:///modules/lazyvimium/ui/LazyvimiumMenuKeys.sys.mjs",
+  LazyvimiumTheme: "resource:///modules/lazyvimium/ui/LazyvimiumTheme.sys.mjs",
   LazyvimiumVimModeSwitch:
     "resource:///modules/lazyvimium/ui/LazyvimiumVimModeSwitch.sys.mjs",
   LazyvimiumToolbar:
@@ -592,6 +593,7 @@ class LazyvimiumService {
       this.reload();
     }
 
+    lazy.LazyvimiumTheme.apply(window.document);
     window.windowUtils.loadSheetUsingURIString(
       LAZYVIMIUM_STYLESHEET,
       window.windowUtils.AUTHOR_SHEET
@@ -612,10 +614,14 @@ class LazyvimiumService {
     // takes the keys from all of them.
     const onChange = buffer => {
       if (buffer.isOpen) {
-        for (const other of [ui.explorer, ui.toolbar, ui.library, ui.agent]) {
+        for (const other of [ui.explorer, ui.toolbar, ui.library]) {
           if (other != buffer) {
             other.close();
           }
+        }
+        // An agent panel beside the tab stays, as a split view pane would.
+        if (buffer != ui.agent) {
+          ui.agent.release();
         }
       }
       ui.engine?.reset();
