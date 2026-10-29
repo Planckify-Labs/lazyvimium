@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Start page</title>
+  <style>
+    body { height: 4000px; margin: 20px; }
+    /* Player controls that fade out unless the mouse is over the player. */
+    #player { width: 300px; height: 120px; background: #222; }
+    #player.autohide:not(:hover) #play { opacity: 0; }
+    /* Hidden by script until the mouse moves, as YouTube's player does. */
+    #player.idle #play { opacity: 0; }
+  </style>
+</head>
+<body>
+  <a id="next" href="file_agent_next.html">Next page</a>
+  <div id="player"><button id="play">Play</button></div>
+  <p id="out">idle</p>
+  <script>
+    const out = document.getElementById("out");
+    document.getElementById("play").addEventListener("click", () => {
+      out.textContent = out.textContent == "playing" ? "paused" : "playing";
+    });
+    const player = document.getElementById("player");
+    player.addEventListener("mousemove", () => player.classList.remove("idle"));
+    document.addEventListener("keydown", event => {
+      const key = event.isTrusted ? event.key : `untrusted ${event.key}`;
+      out.dataset.keys = `${out.dataset.keys ?? ""}${key},`;
+    });
+  </script>
+</body>
+</html>

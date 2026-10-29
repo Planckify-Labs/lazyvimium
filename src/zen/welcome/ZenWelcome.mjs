@@ -10,6 +10,8 @@
     CustomizableUI:
       "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
     AddonRepository: "resource://gre/modules/addons/AddonRepository.sys.mjs",
+    LazyvimiumAgents:
+      "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
     SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   });
 
@@ -31,6 +33,18 @@
   ];
 
   const kAdBlockerId = "uBlock0@raymondhill.net";
+
+  const kVimModePref = "lazyvimium.enabled";
+
+  // The keys shown on the keyboard page, LazyVim's own.
+  const kLazyvimiumKeys = [
+    ["j  k", "zen-welcome-lazyvimium-key-scroll"],
+    ["⇧H  ⇧L", "zen-welcome-lazyvimium-key-tabs"],
+    ["Space", "zen-welcome-lazyvimium-key-leader"],
+    ["Space e", "zen-welcome-lazyvimium-key-explorer"],
+    ["Space a a", "zen-welcome-lazyvimium-key-agent"],
+    ["Esc", "zen-welcome-lazyvimium-key-escape"],
+  ];
 
   const gChoices = {
     setDefaultBrowser: false,
@@ -715,6 +729,123 @@
         },
       },
       {
+        id: "lazyvimium-keys",
+        title: "zen-welcome-lazyvimium-keys-title",
+        descriptions: ["zen-welcome-lazyvimium-keys-description"],
+        buttons: [kNextButton],
+        render(content) {
+          const sheet = document.createElement("div");
+          sheet.className = "zen-welcome-lazyvimium-keys";
+          for (const [keys, l10n] of kLazyvimiumKeys) {
+            const kbd = document.createElement("kbd");
+            kbd.textContent = keys;
+            const desc = document.createElement("span");
+            document.l10n.setAttributes(desc, l10n);
+            sheet.append(kbd, desc);
+          }
+          const enabled = Services.prefs.getBoolPref(kVimModePref, true);
+          content.append(
+            sheet,
+            createOption({
+              id: "zen-welcome-lazyvimium-keys-yes",
+              group: "zen-welcome-lazyvimium-keys",
+              l10n: "zen-welcome-lazyvimium-keys-yes",
+              checked: enabled,
+            }),
+            createOption({
+              id: "zen-welcome-lazyvimium-keys-no",
+              group: "zen-welcome-lazyvimium-keys",
+              l10n: "zen-welcome-lazyvimium-keys-no",
+              checked: !enabled,
+            })
+          );
+        },
+        commit(content) {
+          Services.prefs.setBoolPref(
+            kVimModePref,
+            content.querySelector("#zen-welcome-lazyvimium-keys-yes").checked
+          );
+        },
+      },
+      {
+        id: "lazyvimium-agents",
+        title: "zen-welcome-lazyvimium-agents-title",
+        descriptions: ["zen-welcome-lazyvimium-agents-description"],
+        buttons: [kNextButton],
+        async render(content) {
+          const lookup = document.createElement("p");
+          lookup.className = "zen-welcome-lazyvimium-agents-status";
+          document.l10n.setAttributes(
+            lookup,
+            "zen-welcome-lazyvimium-agents-looking"
+          );
+          content.appendChild(lookup);
+          const agents = await lazy.LazyvimiumAgents.agents();
+          const preferred = await lazy.LazyvimiumAgents.defaultAgent();
+          if (!content.isConnected) {
+            return;
+          }
+          const installed = agents.filter(agent => agent.path);
+          const missing = agents.filter(agent => !agent.path);
+          content.agents = installed;
+          if (installed.length) {
+            lookup.remove();
+          } else {
+            document.l10n.setAttributes(
+              lookup,
+              "zen-welcome-lazyvimium-agents-none"
+            );
+          }
+          for (const agent of installed) {
+            const version = document.createElement("span");
+            version.className = "zen-welcome-lazyvimium-agent-version";
+            version.textContent = agent.version ?? "";
+            const option = createOption({
+              id: `zen-welcome-agent-${agent.id}`,
+              group: "zen-welcome-lazyvimium-agents",
+              text: agent.name,
+              checked: agent.id == preferred?.id,
+              extra: version,
+            });
+            option.querySelector("input").value = agent.id;
+            content.appendChild(option);
+          }
+          if (missing.length) {
+            const list = document.createElement("div");
+            list.className = "zen-welcome-lazyvimium-agents-missing";
+            const heading = document.createElement("span");
+            document.l10n.setAttributes(
+              heading,
+              "zen-welcome-lazyvimium-agents-missing"
+            );
+            list.appendChild(heading);
+            for (const agent of missing) {
+              const row = document.createElement("div");
+              const agentName = document.createElement("strong");
+              agentName.textContent = agent.name;
+              const hint = document.createElement("code");
+              hint.textContent = agent.install;
+              row.append(agentName, hint);
+              list.appendChild(row);
+            }
+            content.appendChild(list);
+          }
+        },
+        commit(content) {
+          const id = content.querySelector(
+            "input[name='zen-welcome-lazyvimium-agents']:checked"
+          )?.value;
+          const agent = content.agents?.find(candidate => candidate.id == id);
+          if (!agent) {
+            return;
+          }
+          lazy.LazyvimiumAgents.setDefaultAgent(agent.id);
+          // Agents that need lazyvimium added to their own config get it
+          // now, so the first question just works.
+          lazy.LazyvimiumAgents.ensureConnected(agent).catch(console.error);
+        },
+      },
+      {
         id: "colors",
         title: "zen-welcome-workspace-colors-title",
         descriptions: ["zen-welcome-workspace-colors-description"],
@@ -998,19 +1129,56 @@
     "max-height",
   ];
 
+  let _syncSizeLock = null;
+
+  function clearSizeLock() {
+    const root = document.documentElement;
+    for (const property of kSizeLockProperties) {
+      root.style.removeProperty(property);
+    }
+    root.removeAttribute("zen-welcome-inset");
+    root.style.removeProperty("--zen-welcome-width");
+    root.style.removeProperty("--zen-welcome-height");
+  }
+
+  // Where the window takes the onboarding's size (Windows, macOS, floating
+  // Linux desktops) the page is locked to it, centered on the screen.
+  // Tiling window managers (Hyprland, sway, i3) size windows themselves and
+  // ignore resizeTo; a page locked to a size the window does not have filled
+  // only its top left corner and left the rest see-through. There the
+  // window keeps its tile and the onboarding sits in the middle of it at
+  // that size instead, looking the same.
   function lockWindowSize(width, height) {
-    const style = document.documentElement.style;
-    style.setProperty("min-width", `${width}px`, "important");
-    style.setProperty("max-width", `${width}px`, "important");
-    style.setProperty("min-height", `${height}px`, "important");
-    style.setProperty("max-height", `${height}px`, "important");
+    window.removeEventListener("resize", _syncSizeLock);
+    _syncSizeLock = () => {
+      // resizeTo sizes the outside of the window, while the early lock in
+      // ZenStartup sizes its inside; on Linux the two differ by the frame.
+      const near = (inner, outer, size) =>
+        Math.min(Math.abs(inner - size), Math.abs(outer - size)) <= 2;
+      const fits =
+        near(window.innerWidth, window.outerWidth, width) &&
+        near(window.innerHeight, window.outerHeight, height);
+      clearSizeLock();
+      const root = document.documentElement;
+      if (!fits) {
+        root.style.setProperty("--zen-welcome-width", `${width}px`);
+        root.style.setProperty("--zen-welcome-height", `${height}px`);
+        root.setAttribute("zen-welcome-inset", "true");
+        return;
+      }
+      root.style.setProperty("min-width", `${width}px`, "important");
+      root.style.setProperty("max-width", `${width}px`, "important");
+      root.style.setProperty("min-height", `${height}px`, "important");
+      root.style.setProperty("max-height", `${height}px`, "important");
+    };
+    window.addEventListener("resize", _syncSizeLock);
+    _syncSizeLock();
   }
 
   function unlockWindowSize() {
-    const style = document.documentElement.style;
-    for (const property of kSizeLockProperties) {
-      style.removeProperty(property);
-    }
+    window.removeEventListener("resize", _syncSizeLock);
+    _syncSizeLock = null;
+    clearSizeLock();
   }
 
   function centerWindowOnScreen() {

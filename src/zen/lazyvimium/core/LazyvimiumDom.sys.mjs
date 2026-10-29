@@ -17,6 +17,13 @@ const NON_TEXT_INPUTS = new Set([
 
 export const LazyvimiumDom = {
   /**
+   * Set while an agent presses keys in this content process. Its keys are
+   * meant for the page, not for the vim engine: in dev testing the engine
+   * took an agent's k (scroll up) and Escape before YouTube saw them.
+   */
+  agentTyping: false,
+
+  /**
    * Whether typing into this element edits it, which puts the page in
    * insert mode.
    *

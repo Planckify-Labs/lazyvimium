@@ -10,7 +10,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 const { InternalTestingProfileMigrator } = ChromeUtils.importESModule(
-  "resource:///modules/InternalTestingProfileMigrator.sys.mjs"
+  "moz-src:///browser/components/migration/InternalTestingProfileMigrator.sys.mjs"
 );
 
 const { MigrationWizardConstants } = ChromeUtils.importESModule(
@@ -33,12 +33,65 @@ add_task(async function test_Welcome_Steps() {
   const selectedTab = gBrowser.selectedTab;
   await wait(2000); // Give tons of time for the welcome start button to be clicked
   await waitForFocus();
+
+  // A tiling Wayland compositor keeps the window at its tile's size: the
+  // onboarding then sits in the middle of it at its own size.
+  const root = document.documentElement;
+  const width = Math.min(1200, screen.availWidth);
+  const height = Math.min(720, screen.availHeight);
+  ok(!root.hasAttribute("zen-welcome-inset"), "The window took its size");
+  Assert.equal(root.style.maxWidth, `${width}px`, "and is locked to it");
+  // A compositor sizes the window whatever its limits; here the lock is
+  // lifted for one frame so that resizeTo can stand in for it.
+  root.style.removeProperty("max-width");
+  root.style.removeProperty("max-height");
+  await new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  window.resizeTo(width + 200, height + 120);
+  await TestUtils.waitForCondition(
+    () => root.hasAttribute("zen-welcome-inset"),
+    "the onboarding is inset in a window of another size"
+  );
+  await TestUtils.waitForCondition(() => {
+    const card = document.getElementById("zen-welcome").getBoundingClientRect();
+    return Math.round(card.width) == width;
+  }, "the card has the onboarding's size");
+  const card = document.getElementById("zen-welcome").getBoundingClientRect();
+  Assert.equal(Math.round(card.height), height, "and its height");
+  Assert.less(
+    Math.abs(card.x + card.width / 2 - window.innerWidth / 2),
+    2,
+    "centered across"
+  );
+  Assert.less(
+    Math.abs(card.y + card.height / 2 - window.innerHeight / 2),
+    2,
+    "and down"
+  );
+  window.resizeTo(width, height);
+  await TestUtils.waitForCondition(
+    () => !root.hasAttribute("zen-welcome-inset"),
+    "back at its size, the window is locked again"
+  );
+  Assert.equal(root.style.maxWidth, `${width}px`);
+
   await EventUtils.synthesizeMouseAtCenter(
     document.getElementById("zen-welcome-start-button"),
     {}
   );
   await wait(1500); // Wait for the transition to complete
   ok(true, "Welcome start button clicked successfully");
+  // Vim mode is offered later in the onboarding, not assumed before it.
+  Assert.equal(
+    document.getElementById("lazyvimium-statusline")?.style.display,
+    "none",
+    "No vim mode indicator during the onboarding"
+  );
+  ok(
+    !root.hasAttribute("lazyvimium-mode"),
+    "Nor a vim mode color on the window"
+  );
   Assert.notEqual(
     window.windowState,
     window.STATE_MAXIMIZED,
@@ -184,10 +237,53 @@ add_task(async function test_Welcome_Steps() {
   );
   await BrowserTestUtils.closeWindow(wizardWin);
   await TestUtils.waitForCondition(
-    () => currentPageContent()?.getAttribute("page") === "colors",
+    () => currentPageContent()?.getAttribute("page") === "lazyvimium-keys",
     "the onboarding to move on once the wizard closes"
   );
   await wait(800); // Let the page transition settle.
+
+  const keys = currentPageContent();
+  Assert.greater(
+    keys.querySelectorAll(".zen-welcome-lazyvimium-keys kbd").length,
+    0,
+    "The keyboard page shows the keys"
+  );
+  ok(
+    keys.querySelector("#zen-welcome-lazyvimium-keys-yes").checked,
+    "Vim keys are on by default"
+  );
+  await goNextWelcomePage("zen-generic-next");
+  ok(
+    Services.prefs.getBoolPref("lazyvimium.enabled"),
+    "Keeping vim keys leaves them on"
+  );
+
+  await TestUtils.waitForCondition(
+    () => currentPageContent()?.getAttribute("page") === "lazyvimium-agents",
+    "the agents page follows"
+  );
+  await TestUtils.waitForCondition(
+    () =>
+      !currentPageContent().querySelector(
+        "[data-l10n-id='zen-welcome-lazyvimium-agents-looking']"
+      ),
+    "the agents on this computer are looked up",
+    100,
+    200
+  );
+  ok(
+    currentPageContent().querySelector(
+      ".zen-welcome-option, [data-l10n-id='zen-welcome-lazyvimium-agents-none']"
+    ),
+    "It offers the agents found, or says none were"
+  );
+  await goNextWelcomePage("zen-generic-next");
+
+  await TestUtils.waitForCondition(
+    () => currentPageContent()?.getAttribute("page") === "colors",
+    "the colors page follows"
+  );
+  await wait(800);
 
   await goNextWelcomePage("zen-generic-next");
   ok(true, "Welcome Theme Step Test Finished");
@@ -277,6 +373,11 @@ add_task(async function test_Welcome_Steps() {
   ok(true, "Welcome Finish Step Test Finished");
 
   await wait(3000); // Wait for the finish animation to complete
+  Assert.equal(
+    document.getElementById("lazyvimium-statusline")?.style.display,
+    "flex",
+    "Vim mode, kept on, shows its mode once the onboarding is over"
+  );
 
   for (const url of urlsToCheck) {
     ok(

@@ -13,3 +13,12 @@
 
 - name: lazyvimium.statusline.enabled
   value: true
+
+- name: lazyvimium.agent.default
+  value: "" # an agent id (claude, codex, cursor, antigravity, opencode); empty picks the first installed
+
+- name: lazyvimium.agent.log.enabled
+  value: true # a JSONL trace per conversation in <profile>/lazyvimium/agent/logs, <leader>al opens it
+
+- name: lazyvimium.agent.log.stdout
+  value: false # also a one-line summary per entry on stdout; npm run dev turns it on

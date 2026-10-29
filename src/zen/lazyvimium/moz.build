@@ -6,6 +6,15 @@ EXTRA_JS_MODULES.lazyvimium += [
     "Lazyvimium.sys.mjs",
 ]
 
+EXTRA_JS_MODULES.lazyvimium.agent += [
+    "agent/LazyvimiumAgentDetect.sys.mjs",
+    "agent/LazyvimiumAgentHarness.sys.mjs",
+    "agent/LazyvimiumAgentLog.sys.mjs",
+    "agent/LazyvimiumAgents.sys.mjs",
+    "agent/LazyvimiumAgentServer.sys.mjs",
+    "agent/LazyvimiumAgentTools.sys.mjs",
+]
+
 EXTRA_JS_MODULES.lazyvimium.actors += [
     "actors/LazyvimiumKeysChild.sys.mjs",
     "actors/LazyvimiumKeysParent.sys.mjs",
@@ -27,6 +36,8 @@ EXTRA_JS_MODULES.lazyvimium.core += [
 ]
 
 EXTRA_JS_MODULES.lazyvimium.plugins += [
+    "plugins/LazyvimiumAgent.sys.mjs",
+    "plugins/LazyvimiumAgentContent.sys.mjs",
     "plugins/LazyvimiumCore.sys.mjs",
     "plugins/LazyvimiumCoreContent.sys.mjs",
     "plugins/LazyvimiumEdit.sys.mjs",
@@ -49,6 +60,7 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
 ]
 
 EXTRA_JS_MODULES.lazyvimium.ui += [
+    "ui/LazyvimiumAgentDock.sys.mjs",
     "ui/LazyvimiumExplorer.sys.mjs",
     "ui/LazyvimiumHints.sys.mjs",
     "ui/LazyvimiumLibraryView.sys.mjs",
@@ -56,6 +68,7 @@ EXTRA_JS_MODULES.lazyvimium.ui += [
     "ui/LazyvimiumPicker.sys.mjs",
     "ui/LazyvimiumStatusline.sys.mjs",
     "ui/LazyvimiumToolbar.sys.mjs",
+    "ui/LazyvimiumVimModeSwitch.sys.mjs",
     "ui/LazyvimiumWhichKey.sys.mjs",
 ]
 

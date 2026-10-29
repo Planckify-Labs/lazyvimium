@@ -4,8 +4,16 @@
 
 [DEFAULT]
 
+["browser_lazyvimium_agent.js"]
+support-files = [
+  "file_agent_start.html",
+  "file_agent_next.html",
+]
+
 ["browser_lazyvimium_explorer.js"]
 
 ["browser_lazyvimium_keys.js"]
 
 ["browser_lazyvimium_library.js"]
+
+["browser_lazyvimium_vim_mode.js"]

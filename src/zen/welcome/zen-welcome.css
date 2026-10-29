@@ -35,6 +35,29 @@
   min-height: 560px;
 }
 
+/* The window kept a size of its own, as tiling Wayland compositors decide
+   (ZenWelcome.mjs, lockWindowSize): the onboarding is a card of the size it
+   asked for in the middle of the window, over the window's background, as it
+   looks where the window takes that size. */
+:root[zen-welcome-stage][zen-welcome-inset] {
+  & #zen-welcome-video,
+  & #zen-welcome {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: min(var(--zen-welcome-width), 100vw - 32px);
+    height: min(var(--zen-welcome-height), 100vh - 32px);
+    translate: -50% -50%;
+    border-radius: 16px;
+  }
+
+  & #zen-welcome {
+    overflow: hidden;
+    box-shadow: 0 30px 90px -20px rgba(0, 0, 0, 0.55);
+    outline: 0.5px solid light-dark(rgba(0, 0, 0, 0.15), rgba(255, 255, 255, 0.12));
+  }
+}
+
 #zen-welcome {
   --zen-welcome-accent: var(--zen-accent-button-color);
   --zen-welcome-sidebar-bg: light-dark(#ffffff, #1c1c1e);
@@ -237,6 +260,64 @@
 
     &[exiting] {
       pointer-events: none;
+    }
+
+    &[page="lazyvimium-keys"],
+    &[page="lazyvimium-agents"] {
+      gap: 1.25rem;
+    }
+
+    .zen-welcome-lazyvimium-keys {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.7rem 1.4rem;
+      width: 100%;
+      max-width: 30rem;
+      margin-bottom: 1rem;
+      font-size: 1.05rem;
+
+      & kbd {
+        justify-self: end;
+        padding: 0.15rem 0.6rem;
+        border-radius: 8px;
+        border: 1px solid var(--zen-welcome-border);
+        background: var(--zen-welcome-surface-bg);
+        font: 700 0.95rem ui-monospace, monospace;
+      }
+    }
+
+    .zen-welcome-lazyvimium-agent-version {
+      order: 1;
+      margin-left: auto;
+      font-size: 0.9rem;
+      opacity: 0.55;
+    }
+
+    .zen-welcome-lazyvimium-agents-status {
+      opacity: 0.7;
+    }
+
+    .zen-welcome-lazyvimium-agents-missing {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      width: 100%;
+      max-width: 30rem;
+      font-size: 0.95rem;
+      opacity: 0.7;
+
+      & > div {
+        display: flex;
+        gap: 0.8rem;
+        min-width: 0;
+      }
+
+      & code {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        user-select: text;
+      }
     }
 
     &[page="essentials"] {

@@ -7,6 +7,9 @@ import checkForZenUpdates, {
   playWindowSweepAnimation,
 } from "chrome://browser/content/ZenUpdates.mjs";
 
+const kWelcomeScreenSeenPref = "zen.welcome-screen.seen";
+const kWelcomeScreenAlwaysShowPref = "zen.welcome-screen.always-show";
+
 /**
  * Drives the parts of Zen's per-window startup that have to happen in a fixed
  * order relative to Firefox's own startup.
@@ -27,6 +30,7 @@ class ZenStartup {
   }
 
   init() {
+    this.#fixWelcomeWindowSize();
     this.openWatermark();
     this.#zenInitBrowserLayout();
   }
@@ -169,9 +173,36 @@ class ZenStartup {
     });
   }
 
+  // Whether this window opens with the welcome wizard.
+  get #willShowWelcome() {
+    return (
+      !Services.env.get("MOZ_HEADLESS") &&
+      !BrowserHandler.kiosk &&
+      (!Services.prefs.getBoolPref(kWelcomeScreenSeenPref, false) ||
+        Services.prefs.getBoolPref(kWelcomeScreenAlwaysShowPref, false))
+    );
+  }
+
+  // The welcome wizard is a window of its own size in the middle of the
+  // screen. Tiling Wayland compositors (Hyprland, sway) float and center a
+  // window only if it has a fixed size when it first appears, as Steam's
+  // launcher does, and ignore resizing one they have already tiled. So the
+  // size is fixed here, before the window is first shown; ZenWelcome.mjs
+  // takes the lock over and lifts it when the wizard ends.
+  #fixWelcomeWindowSize() {
+    if (!this.#willShowWelcome) {
+      return;
+    }
+    const width = Math.min(1200, screen.availWidth);
+    const height = Math.min(720, screen.availHeight);
+    const style = document.documentElement.style;
+    style.setProperty("min-width", `${width}px`, "important");
+    style.setProperty("max-width", `${width}px`, "important");
+    style.setProperty("min-height", `${height}px`, "important");
+    style.setProperty("max-height", `${height}px`, "important");
+  }
+
   #checkForWelcomePage() {
-    const kWelcomeScreenSeenPref = "zen.welcome-screen.seen";
-    const kWelcomeScreenAlwaysShowPref = "zen.welcome-screen.always-show";
     if (Services.env.get("MOZ_HEADLESS")) {
       Services.prefs.setBoolPref(kWelcomeScreenSeenPref, true);
       return;
@@ -181,10 +212,7 @@ class ZenStartup {
     if (BrowserHandler.kiosk) {
       return;
     }
-    if (
-      !Services.prefs.getBoolPref(kWelcomeScreenSeenPref, false) ||
-      Services.prefs.getBoolPref(kWelcomeScreenAlwaysShowPref, false)
-    ) {
+    if (this.#willShowWelcome) {
       Services.prefs.setBoolPref(kWelcomeScreenSeenPref, true);
       Services.prefs.setStringPref(
         "zen.updates.last-build-id",

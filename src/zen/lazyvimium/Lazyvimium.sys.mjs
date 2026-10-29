@@ -14,6 +14,7 @@ import {
 } from "resource:///modules/lazyvimium/core/LazyvimiumShared.sys.mjs";
 import { LazyvimiumKeymapsSpec } from "resource:///modules/lazyvimium/config/LazyvimiumKeymaps.sys.mjs";
 import { LazyvimiumOptions } from "resource:///modules/lazyvimium/config/LazyvimiumOptions.sys.mjs";
+import { LazyvimiumAgentSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumAgent.sys.mjs";
 import { LazyvimiumCoreSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumCore.sys.mjs";
 import { LazyvimiumEditSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumEdit.sys.mjs";
 import { LazyvimiumExplorerSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumExplorerSpec.sys.mjs";
@@ -34,12 +35,18 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.sys.mjs",
+  LazyvimiumAgentDock:
+    "resource:///modules/lazyvimium/ui/LazyvimiumAgentDock.sys.mjs",
+  LazyvimiumAgents:
+    "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
   LazyvimiumExplorer:
     "resource:///modules/lazyvimium/ui/LazyvimiumExplorer.sys.mjs",
   LazyvimiumLibraryView:
     "resource:///modules/lazyvimium/ui/LazyvimiumLibraryView.sys.mjs",
   LazyvimiumMenuKeys:
     "resource:///modules/lazyvimium/ui/LazyvimiumMenuKeys.sys.mjs",
+  LazyvimiumVimModeSwitch:
+    "resource:///modules/lazyvimium/ui/LazyvimiumVimModeSwitch.sys.mjs",
   LazyvimiumToolbar:
     "resource:///modules/lazyvimium/ui/LazyvimiumToolbar.sys.mjs",
   LazyvimiumStatusline:
@@ -66,6 +73,7 @@ export const LAZYVIMIUM_SPECS = [
   LazyvimiumExplorerSpec,
   LazyvimiumToolbarSpec,
   LazyvimiumLibrarySpec,
+  LazyvimiumAgentSpec,
   LazyvimiumUiSpec,
   LazyvimiumSessionSpec,
   LazyvimiumZenCommandsSpec,
@@ -184,12 +192,8 @@ class LazyvimiumService {
       return;
     }
     this.#initialized = true;
-    if (LazyvimiumOptions.enabled) {
-      const defaults = Services.prefs.getDefaultBranch("");
-      for (const [name, value] of Object.entries(VIM_MODE_DEFAULTS)) {
-        defaults.setBoolPref(name, value);
-      }
-    }
+    this.#applyVimModeDefaults();
+    lazy.LazyvimiumAgents.lazyvimium = this;
     this.keymap = new LazyvimiumKeymap({ leader: LazyvimiumOptions.leader });
     this.plugins = new LazyvimiumPlugins({
       actions: this.actions,
@@ -225,12 +229,17 @@ class LazyvimiumService {
         break;
       case LazyvimiumOptions.PREF_ENABLED:
       case LazyvimiumOptions.PREF_STATUSLINE:
-        for (const ui of this.#windows.values()) {
-          ui.statusline.setVisible(this.#statuslineVisible);
+        if (data == LazyvimiumOptions.PREF_ENABLED) {
+          this.#applyVimModeDefaults();
+        }
+        for (const [document, ui] of this.#windows) {
+          ui.statusline.setVisible(this.#statuslineVisibleIn(document));
+          lazy.LazyvimiumVimModeSwitch.sync(document);
           if (!LazyvimiumOptions.enabled) {
             ui.explorer.close();
             ui.toolbar.close();
             ui.library.release();
+            ui.whichKey.hide();
           }
         }
         break;
@@ -314,7 +323,8 @@ class LazyvimiumService {
       console.error(`Lazyvimium: a page asked for unmapped action "${id}"`);
       return;
     }
-    if (!windowOf(browser)?.gBrowser) {
+    const window = windowOf(browser);
+    if (!window?.gBrowser || this.#inOnboarding(window.document)) {
       return;
     }
     try {
@@ -430,6 +440,14 @@ class LazyvimiumService {
    */
   libraryFor(window) {
     return this.#windows.get(window.document)?.library ?? null;
+  }
+
+  /**
+   * @param {Window} window
+   * @returns {object|null} The window's LazyvimiumAgentDock.
+   */
+  agentDockFor(window) {
+    return this.#windows.get(window.document)?.agent ?? null;
   }
 
   // The browser UI buffer the keys go to, if one is open.
@@ -586,13 +604,15 @@ class LazyvimiumService {
       explorer: null,
       toolbar: null,
       library: null,
+      agent: null,
       engine: null,
     };
     const refresh = () => this.#showState(ui, this.#stateOf(window, ui));
-    // One buffer of the browser UI is open at a time.
+    // One buffer of the browser UI is open at a time, and the agent dock
+    // takes the keys from all of them.
     const onChange = buffer => {
       if (buffer.isOpen) {
-        for (const other of [ui.explorer, ui.toolbar, ui.library]) {
+        for (const other of [ui.explorer, ui.toolbar, ui.library, ui.agent]) {
           if (other != buffer) {
             other.close();
           }
@@ -610,15 +630,41 @@ class LazyvimiumService {
     ui.library = new lazy.LazyvimiumLibraryView(window, {
       onChange: () => onChange(ui.library),
     });
+    ui.agent = new lazy.LazyvimiumAgentDock(window, {
+      onChange: () => onChange(ui.agent),
+    });
     this.#windows.set(window.document, ui);
-    ui.statusline.setVisible(this.#statuslineVisible);
+    ui.statusline.setVisible(this.#statuslineVisibleIn(window.document));
+    // Once the toolbars are restored, which init() runs too early for. A
+    // switch that fails must not take the keys down with it.
+    try {
+      lazy.LazyvimiumVimModeSwitch.register();
+      lazy.LazyvimiumVimModeSwitch.sync(window.document);
+    } catch (e) {
+      console.error("Lazyvimium: the vim mode switch failed", e);
+    }
+    // The onboarding starts and ends after the window is ready.
+    new window.MutationObserver(() => {
+      ui.statusline.setVisible(this.#statuslineVisibleIn(window.document));
+      ui.whichKey.hide();
+    }).observe(window.document.documentElement, {
+      attributes: true,
+      attributeFilter: ["zen-welcome-stage"],
+    });
     refresh();
     window.gBrowser.tabContainer.addEventListener("TabSelect", refresh);
     window.addEventListener(
       "keydown",
       event => {
+        if (this.#inOnboarding(window.document)) {
+          return;
+        }
         if (ui.whichKey.pinned) {
           ui.whichKey.hide();
+        }
+        // What is typed into the agent dock is the dock's.
+        if (ui.agent.contains(event.target)) {
+          return;
         }
         // An open menu or panel takes the keys, with vim's j and k.
         if (LazyvimiumOptions.enabled && ui.menuKeys.active) {
@@ -674,8 +720,42 @@ class LazyvimiumService {
     );
   }
 
-  get #statuslineVisible() {
-    return LazyvimiumOptions.enabled && LazyvimiumOptions.statusline;
+  // The onboarding looks like plain Zen: vim mode is offered there, not
+  // assumed, so its mode indicator, the window's mode color and its keys in
+  // the browser UI wait until the onboarding is over.
+  #inOnboarding(document) {
+    return document.documentElement.hasAttribute("zen-welcome-stage");
+  }
+
+  #statuslineVisibleIn(document) {
+    return (
+      LazyvimiumOptions.enabled &&
+      LazyvimiumOptions.statusline &&
+      !this.#inOnboarding(document)
+    );
+  }
+
+  // Zen's own defaults, kept when vim mode's replace them.
+  #zenDefaults = null;
+
+  /**
+   * Put vim mode's defaults for Zen's layout in place while it is on, and
+   * Zen's own back when it is turned off. What the user set still wins.
+   */
+  #applyVimModeDefaults() {
+    const defaults = Services.prefs.getDefaultBranch("");
+    if (!this.#zenDefaults) {
+      this.#zenDefaults = {};
+      for (const name of Object.keys(VIM_MODE_DEFAULTS)) {
+        this.#zenDefaults[name] = defaults.getBoolPref(name, false);
+      }
+    }
+    const values = LazyvimiumOptions.enabled
+      ? VIM_MODE_DEFAULTS
+      : this.#zenDefaults;
+    for (const [name, value] of Object.entries(values)) {
+      defaults.setBoolPref(name, value);
+    }
   }
 
   #registerActor() {

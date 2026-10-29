@@ -75,6 +75,87 @@
   }
 }
 
+/* The vim mode switch, in NORMAL's pink while on: in the top bar, or in the
+   row below the sidebar with Zen's single toolbar. */
+#lazyvimium-vim-mode-button {
+  align-items: center;
+  padding-inline: 4px;
+
+  & .lazyvimium-vim-mode {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 6px 0 8px;
+    border: none;
+    border-radius: var(--border-radius-medium, 6px);
+    background: transparent;
+    color: inherit;
+    font: 600 11px/1 ui-monospace, monospace;
+    letter-spacing: 0.02em;
+
+    &:hover {
+      background-color: var(--toolbarbutton-hover-background, color-mix(in srgb, currentColor 12%, transparent));
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--focus-outline-color, AccentColor);
+      outline-offset: -2px;
+    }
+  }
+
+  & .lazyvimium-vim-mode-label {
+    opacity: 0.6;
+
+    /* Moved into the narrow row above the sidebar, the switch keeps only its
+       track; its name is in the tooltip. */
+    #zen-sidebar-top-buttons & {
+      display: none;
+    }
+  }
+
+  & .lazyvimium-vim-mode-track {
+    position: relative;
+    width: 26px;
+    height: 14px;
+    border-radius: 7px;
+    background-color: color-mix(in srgb, currentColor 28%, transparent);
+    transition: background-color 0.15s ease-out;
+
+    & > span {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: light-dark(#ffffff, #1b1d2b);
+      transition: translate 0.15s ease-out;
+    }
+  }
+
+  &[checked] {
+    & .lazyvimium-vim-mode-label {
+      opacity: 1;
+    }
+
+    & .lazyvimium-vim-mode-track {
+      background-color: #fca7ea;
+
+      & > span {
+        translate: 12px 0;
+        background-color: #1b1d2b;
+      }
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #lazyvimium-vim-mode-button :is(.lazyvimium-vim-mode-track, .lazyvimium-vim-mode-track > span) {
+    transition: none;
+  }
+}
+
 #lazyvimium-explorer-focus,
 #lazyvimium-toolbar-focus,
 #lazyvimium-library-focus {
@@ -107,7 +188,9 @@
 
 /* Floating UI uses the glass of Zen's floating urlbar (zen-omnibox.css). */
 #lazyvimium-picker,
-#lazyvimium-which-key {
+#lazyvimium-which-key,
+#lazyvimium-agent-dock,
+#lazyvimium-agent-pill {
   --lazyvimium-glass-background: light-dark(rgb(255, 255, 255), rgb(24 24 24));
 
   position: fixed;
@@ -134,7 +217,7 @@
 
 /* stylelint-disable-next-line media-query-no-invalid */
 @media -moz-pref("zen.theme.acrylic-urlbar") and (not (prefers-reduced-transparency: reduce)) {
-  :root:not([zen-no-acrylic="true"]) :is(#lazyvimium-picker, #lazyvimium-which-key) {
+  :root:not([zen-no-acrylic="true"]) :is(#lazyvimium-picker, #lazyvimium-which-key, #lazyvimium-agent-dock, #lazyvimium-agent-pill) {
     backdrop-filter: var(--zen-backdrop-underlay) blur(40px);
 
     &:not(:-moz-window-inactive) {
@@ -283,4 +366,279 @@
   padding: 8px 10px 2px;
   font-size: 11px;
   opacity: 0.55;
+}
+
+/* The agent dock, at the foot of the tab and clear of the corners the
+   statusline and which-key take. */
+#lazyvimium-agent-dock {
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(680px, calc(100vw - 32px));
+  max-height: 70vh;
+  padding: 0;
+  z-index: 2147483646;
+  overflow: hidden;
+}
+
+.lazyvimium-agent-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.lazyvimium-agent-message {
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+
+  &[type="user"] {
+    align-self: flex-end;
+    max-width: 85%;
+    padding: 6px 11px;
+    border-radius: 14px 14px 4px 14px;
+    background-color: color-mix(in srgb, var(--zen-primary-color, AccentColor) 22%, transparent);
+  }
+
+  &:is([type="step"], [type="tool"]) {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 12px;
+    opacity: 0.75;
+  }
+
+  &[type="tool"] {
+    padding-inline-start: 20px;
+    font-style: italic;
+  }
+
+  &[type="note"] {
+    align-self: center;
+    font-size: 11px;
+    opacity: 0.55;
+  }
+
+  &[type="error"] {
+    color: light-dark(#c4314b, #ff757f);
+  }
+
+  &[type="confirm"] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, #ffc777 18%, transparent);
+  }
+}
+
+.lazyvimium-agent-step-icon {
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+
+  [status="running"] > & {
+    animation: lazyvimium-agent-spin 1s linear infinite;
+  }
+
+  [status="done"] > & {
+    color: light-dark(#2f855a, #c3e88d);
+  }
+
+  [status="failed"] > & {
+    color: light-dark(#c4314b, #ff757f);
+  }
+}
+
+.lazyvimium-agent-step-detail {
+  opacity: 0.7;
+}
+
+@keyframes lazyvimium-agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lazyvimium-agent-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 10px;
+  border-top: 0.5px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.1));
+
+  .lazyvimium-agent-log[hidden] + & {
+    border-top: none;
+  }
+}
+
+.lazyvimium-agent-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.lazyvimium-agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: none;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-color) 20%, transparent);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+
+  &::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--lazyvimium-agent-color);
+  }
+
+  #lazyvimium-agent-dock[running] &::before {
+    animation: lazyvimium-agent-pulse 1.2s ease-in-out infinite;
+  }
+}
+
+.lazyvimium-agent-tab {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.6;
+}
+
+.lazyvimium-agent-status {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.lazyvimium-agent-input {
+  width: 100%;
+  min-height: 22px;
+  margin: 0;
+  padding: 2px 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.lazyvimium-agent-hint {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.lazyvimium-agent-button {
+  padding: 3px 10px;
+  border: 0.5px solid light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+
+  &.primary {
+    border-color: transparent;
+    background-color: var(--zen-primary-color, AccentColor);
+    color: var(--button-text-color-primary, AccentColorText);
+  }
+}
+
+.lazyvimium-agent-install {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+
+  & code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.7;
+    user-select: text;
+  }
+}
+
+.lazyvimium-agent-install-row {
+  display: contents;
+}
+
+.lazyvimium-agent-install-name {
+  font-weight: 600;
+}
+
+/* Under a closed dock: the agent still works on the tab, or has finished. */
+#lazyvimium-agent-pill {
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 12px;
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+
+  &::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--lazyvimium-agent-color);
+  }
+
+  &[running]::before {
+    animation: lazyvimium-agent-pulse 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes lazyvimium-agent-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The tab the agent works on glows in the agent's color, over the page. */
+.browserStack[lazyvimium-agent-driving]::after {
+  content: "";
+  grid-area: 1 / 1;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 2px var(--lazyvimium-agent-color),
+    inset 0 0 28px color-mix(in srgb, var(--lazyvimium-agent-color) 45%, transparent);
+  animation: lazyvimium-agent-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lazyvimium-agent-step-icon,
+  .lazyvimium-agent-chip::before,
+  #lazyvimium-agent-pill::before,
+  .browserStack[lazyvimium-agent-driving]::after {
+    animation: none !important;
+  }
 }

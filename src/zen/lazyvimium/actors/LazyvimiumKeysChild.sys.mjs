@@ -217,7 +217,7 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
 
   #onKeyDown(event) {
     const engine = this.#ensureEngine();
-    if (!engine) {
+    if (!engine || LazyvimiumDom.agentTyping) {
       return;
     }
     this.#syncMode();
