@@ -20,6 +20,66 @@
   }
 }
 
+/* The explorer's cursor and selection over the sidebar's rows, in the
+   statusline's EXPLORER and VISUAL colors. */
+:root[lazyvimium-explorer] {
+  --lazyvimium-explorer-color: #82aaff;
+  --lazyvimium-visual-color: #c099ff;
+
+  & .tabbrowser-tab:is([lazyvimium-cursor], [lazyvimium-selected]) > .tab-stack > .tab-background,
+  & .tab-group-label-container:is([lazyvimium-cursor], [lazyvimium-selected]) {
+    outline: 2px solid var(--lazyvimium-visual-color);
+    outline-offset: -2px;
+  }
+
+  & .tabbrowser-tab[lazyvimium-selected] > .tab-stack > .tab-background,
+  & .tab-group-label-container[lazyvimium-selected] {
+    background-color: color-mix(in srgb, var(--lazyvimium-visual-color) 25%, transparent) !important;
+  }
+
+  & .tabbrowser-tab[lazyvimium-cursor] > .tab-stack > .tab-background,
+  & .tab-group-label-container[lazyvimium-cursor] {
+    outline-color: var(--lazyvimium-explorer-color);
+  }
+}
+
+/* The toolbar's cursor over the top bar's buttons and urlbar, in the
+   statusline's TOOLBAR color. */
+:root[lazyvimium-toolbar] :is(toolbarbutton, #urlbar-container)[lazyvimium-cursor] {
+  outline: 2px solid #ffc777;
+  outline-offset: -2px;
+  border-radius: var(--border-radius-medium, 6px);
+}
+
+#lazyvimium-explorer-focus,
+#lazyvimium-toolbar-focus {
+  position: fixed;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Jump labels on the sidebar's rows, in the picker's flash colors. */
+[lazyvimium-hint] {
+  position: relative;
+
+  &::after {
+    content: attr(lazyvimium-hint);
+    position: absolute;
+    inset-inline-end: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: #a25772;
+    color: #eef5ff;
+    font: 700 11px/16px ui-monospace, monospace;
+    pointer-events: none;
+  }
+}
+
 /* Floating UI uses the glass of Zen's floating urlbar (zen-omnibox.css). */
 #lazyvimium-picker,
 #lazyvimium-which-key {
@@ -74,6 +134,19 @@
   min-width: 30ch;
   max-width: min(60ch, 90vw);
   max-height: 75vh;
+}
+
+#lazyvimium-statusline {
+  right: 12px;
+  bottom: 12px;
+}
+
+/* With the sidebar on the right, the mode indicator and which-key take the
+   bottom left corner, lualine's side for the mode, so they never cover the
+   sidebar's buttons. */
+:root[zen-right-side] :is(#lazyvimium-statusline, #lazyvimium-which-key) {
+  right: auto;
+  left: 12px;
 }
 
 .lazyvimium-which-key-title {

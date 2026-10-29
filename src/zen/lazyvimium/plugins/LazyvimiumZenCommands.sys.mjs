@@ -13,6 +13,7 @@ const CURATED = {
   "spaces.next": ["cmd_zenWorkspaceForward", "Next Space"],
   "spaces.prev": ["cmd_zenWorkspaceBackward", "Prev Space"],
   "spaces.new": ["cmd_zenOpenWorkspaceCreation", "New Space"],
+  "spaces.unload": ["cmd_zenUnloadWorkspace", "Unload Space"],
   "splits.grid": ["cmd_zenSplitViewGrid", "Split Windows in a Grid"],
   "tabs.togglePin": ["cmd_zenTogglePinTab", "Toggle Pin"],
   "tabs.closeUnpinned": ["cmd_zenCloseUnpinnedTabs", "Delete Non-Pinned Tabs"],

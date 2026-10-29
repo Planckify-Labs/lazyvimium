@@ -75,8 +75,58 @@ async function split(window, gridType) {
     splitter.createEmptySplit(side);
     return;
   }
-  const picked = candidates[canOpenUrl ? index - 1 : index];
-  splitter.splitTabs([current, picked], gridType, 1);
+  splitWith(window, candidates[canOpenUrl ? index - 1 : index], gridType);
+}
+
+/**
+ * Show a tab in a new pane next to the current tab, dividing only the
+ * current pane when it is already part of a split.
+ *
+ * @param {Window} window
+ * @param {Element} picked
+ * @param {"vsep"|"hsep"} gridType
+ */
+export function splitWith(window, picked, gridType) {
+  const { gBrowser, gZenViewSplitter: splitter } = window;
+  const current = gBrowser.selectedTab;
+  if (picked == current || current.hasAttribute("zen-empty-tab")) {
+    return;
+  }
+  if (!current.splitView) {
+    splitter.splitTabs([current, picked], gridType, 1);
+    return;
+  }
+  // Zen adds a tab to an existing split at the root of its layout; move it
+  // next to the current pane so only that pane is divided, as in vim.
+  const group = splitter.splitTabs([current, picked], gridType, 0, {
+    activate: false,
+  });
+  if (!group) {
+    return;
+  }
+  // A pinned tab may have been split as a duplicate, which Zen adds last.
+  const added = group.tabs.at(-1);
+  const node = leafOf(group.layoutTree, added);
+  const target = leafOf(group.layoutTree, current);
+  if (node && target) {
+    splitter.removeNode(node);
+    splitter.splitIntoNode(target, node, SPLITS[gridType].side, 0.5);
+  }
+  splitter.activateSplitView(group, true);
+  gBrowser.selectedTab = added;
+}
+
+function leafOf(node, tab) {
+  if (node.tab == tab) {
+    return node;
+  }
+  for (const child of node.children ?? []) {
+    const leaf = leafOf(child, tab);
+    if (leaf) {
+      return leaf;
+    }
+  }
+  return null;
 }
 
 function splitTabs(window) {

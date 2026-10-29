@@ -85,6 +85,11 @@ export const LazyvimiumNavigationSpec = {
       agent: "act",
       run: ({ window }) => window.BrowserCommands.reload(),
     },
+    "page.hardReload": {
+      desc: "Reload Page Without Cache",
+      agent: "act",
+      run: ({ window }) => window.BrowserCommands.reloadSkipCache(),
+    },
     "url.up": {
       desc: "Open Parent Path",
       agent: "act",

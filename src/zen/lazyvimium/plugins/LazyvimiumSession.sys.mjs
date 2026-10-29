@@ -17,6 +17,27 @@ export const LazyvimiumSessionSpec = {
       agent: false,
       run: ({ window }) => window.goQuitApplication({}),
     },
+    "window.minimize": {
+      desc: "Minimize Window",
+      agent: false,
+      run: ({ window }) => window.minimize(),
+    },
+    "window.toggleMaximize": {
+      desc: "Maximize/Restore Window",
+      agent: false,
+      run({ window }) {
+        if (window.windowState == window.STATE_MAXIMIZED) {
+          window.restore();
+        } else {
+          window.maximize();
+        }
+      },
+    },
+    "window.close": {
+      desc: "Close Window",
+      agent: false,
+      run: ({ window }) => window.BrowserCommands.tryToCloseWindow(),
+    },
     "session.restore": {
       desc: "Restore Last Session",
       agent: "act",

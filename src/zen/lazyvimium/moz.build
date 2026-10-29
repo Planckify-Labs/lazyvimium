@@ -31,6 +31,7 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumCoreContent.sys.mjs",
     "plugins/LazyvimiumEdit.sys.mjs",
     "plugins/LazyvimiumEditContent.sys.mjs",
+    "plugins/LazyvimiumExplorerSpec.sys.mjs",
     "plugins/LazyvimiumFind.sys.mjs",
     "plugins/LazyvimiumInputs.sys.mjs",
     "plugins/LazyvimiumInputsContent.sys.mjs",
@@ -40,6 +41,7 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumScrollContent.sys.mjs",
     "plugins/LazyvimiumSession.sys.mjs",
     "plugins/LazyvimiumTabs.sys.mjs",
+    "plugins/LazyvimiumToolbarSpec.sys.mjs",
     "plugins/LazyvimiumUi.sys.mjs",
     "plugins/LazyvimiumWhichKeySpec.sys.mjs",
     "plugins/LazyvimiumWindows.sys.mjs",
@@ -47,8 +49,12 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
 ]
 
 EXTRA_JS_MODULES.lazyvimium.ui += [
+    "ui/LazyvimiumExplorer.sys.mjs",
+    "ui/LazyvimiumHints.sys.mjs",
+    "ui/LazyvimiumMenuKeys.sys.mjs",
     "ui/LazyvimiumPicker.sys.mjs",
     "ui/LazyvimiumStatusline.sys.mjs",
+    "ui/LazyvimiumToolbar.sys.mjs",
     "ui/LazyvimiumWhichKey.sys.mjs",
 ]
 

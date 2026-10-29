@@ -4,11 +4,14 @@
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-// tokyonight moon as lualine draws modes, with NORMAL in pink instead of blue.
+// tokyonight moon as lualine draws modes, with NORMAL in pink instead of blue,
+// the explorer taking the blue and the toolbar the command line's yellow.
 const MODES = {
   n: { label: "NORMAL", color: "#fca7ea" },
   i: { label: "INSERT", color: "#c3e88d" },
   v: { label: "VISUAL", color: "#c099ff" },
+  e: { label: "EXPLORER", color: "#82aaff" },
+  t: { label: "TOOLBAR", color: "#ffc777" },
 };
 
 function rgb(hex) {
@@ -36,10 +39,9 @@ export class LazyvimiumStatusline {
     this.#root = document.documentElement;
     this.#element = document.createElementNS(HTML_NS, "div");
     this.#element.id = "lazyvimium-statusline";
+    // lazyvimium.css picks the corner, away from the sidebar.
     Object.assign(this.#element.style, {
       position: "fixed",
-      right: "12px",
-      bottom: "12px",
       zIndex: "2147483647",
       display: "flex",
       alignItems: "center",
@@ -68,10 +70,11 @@ export class LazyvimiumStatusline {
   }
 
   /**
-   * @param {{mode: string, tokens?: string[], count?: number|null, group?: string|null}} state
+   * @param {{mode: string, tokens?: string[], count?: number|null, group?: string|null, visual?: boolean}} state
+   *   `visual` shows a selection made in another mode, like the explorer's.
    */
-  update({ mode, tokens = [], count = null, group = null }) {
-    const { label, color } = MODES[mode] ?? {
+  update({ mode, tokens = [], count = null, group = null, visual = false }) {
+    const { label, color } = MODES[visual ? "v" : mode] ?? {
       label: mode.toUpperCase(),
       color: "#ffc777",
     };

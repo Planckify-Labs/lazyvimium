@@ -222,6 +222,61 @@ add_task(async function test_shift_h_l_switch_tabs() {
   BrowserTestUtils.removeTab(second);
 });
 
+add_task(async function test_tab_keys_treat_a_split_as_one_tab() {
+  const opened = [];
+  for (let i = 0; i < 4; i++) {
+    opened.push(await openPage());
+  }
+  const [left, right] = opened.slice(1, 3);
+  gZenViewSplitter.splitTabs([left, right], "vsep", 1);
+  await TestUtils.waitForCondition(
+    () => right.splitView && gBrowser.selectedTab == right,
+    "split"
+  );
+  const tabs = gBrowser.visibleTabs;
+  const first = Math.min(tabs.indexOf(left), tabs.indexOf(right));
+  const before = tabs[first - 1];
+  const after = tabs[first + 2];
+  gBrowser.selectedTab = before;
+  before.linkedBrowser.focus();
+
+  const press = async (key, tab, message) => {
+    EventUtils.synthesizeKey(key, { shiftKey: true });
+    await TestUtils.waitForCondition(
+      () => gBrowser.selectedTab == tab,
+      message
+    );
+    tab.linkedBrowser.focus();
+  };
+  await press("L", right, "<S-l> goes to the split, on the pane used last");
+  await press("L", after, "<S-l> again leaves the split for the next tab");
+  await press("H", right, "<S-h> comes back to the split");
+  await press("H", before, "and <S-h> again skips its other pane");
+
+  pressLeader("`");
+  await TestUtils.waitForCondition(
+    () => gBrowser.selectedTab == right,
+    "<leader>` goes back to the split, on the pane used last"
+  );
+  right.linkedBrowser.focus();
+  EventUtils.synthesizeKey("h", { ctrlKey: true });
+  await TestUtils.waitForCondition(
+    () => gBrowser.selectedTab == left,
+    "<C-h> moves to the other pane"
+  );
+  left.linkedBrowser.focus();
+  pressLeader("`");
+  await TestUtils.waitForCondition(
+    () => gBrowser.selectedTab == before,
+    "<leader>` leaves the split for the tab before it, not the other pane"
+  );
+
+  gZenViewSplitter.unsplitCurrentView();
+  for (const tab of opened) {
+    BrowserTestUtils.removeTab(tab);
+  }
+});
+
 // APZ scrolls <Space>, PageDown and the arrows asynchronously unless the
 // focused page has a key listener that could cancel them (see
 // HasNonPassiveNonSystemGroupListenersForUntrustedKeyEvents). Synthesized
@@ -479,6 +534,47 @@ add_task(async function test_leader_wo_unsplits() {
   );
   BrowserTestUtils.removeTab(first);
   BrowserTestUtils.removeTab(second);
+});
+
+add_task(async function test_split_divides_only_the_current_pane() {
+  const left = await openPage(`<title>left</title>${PAGE}`);
+  const right = await openPage(`<title>right</title>${PAGE}`);
+  const below = await openPage(`<title>below</title>${PAGE}`);
+  gZenViewSplitter.splitTabs([left, right], "vsep", 1);
+  await TestUtils.waitForCondition(
+    () => right.splitView && gBrowser.selectedTab == right,
+    "two panes side by side"
+  );
+  right.linkedBrowser.focus();
+
+  pressLeader("-");
+  await TestUtils.waitForCondition(() => picker(), "<leader>- opens a picker");
+  const row = [...picker().querySelectorAll(".lazyvimium-picker-item")].find(
+    r => r.querySelector(".lazyvimium-picker-label").textContent == "below"
+  );
+  EventUtils.synthesizeKey(
+    row.querySelector(".lazyvimium-picker-key").textContent
+  );
+  await TestUtils.waitForCondition(
+    () => below.splitView && gBrowser.selectedTab == below,
+    "the picked tab joins the split and gets the focus"
+  );
+
+  const { layoutTree } = gZenViewSplitter._data[gZenViewSplitter.currentView];
+  is(layoutTree.direction, "row", "the panes are still side by side");
+  is(layoutTree.children[0].tab, left, "the left pane is untouched");
+  const column = layoutTree.children[1];
+  is(column.direction, "column", "the right pane is divided");
+  Assert.deepEqual(
+    column.children.map(node => node.tab),
+    [right, below],
+    "with the picked tab below the current one"
+  );
+
+  gZenViewSplitter.unsplitCurrentView();
+  for (const tab of [left, right, below]) {
+    BrowserTestUtils.removeTab(tab);
+  }
 });
 
 add_task(async function test_escape_dismisses_the_picker() {
@@ -747,7 +843,7 @@ add_task(async function test_which_key_popup() {
   );
   const rows = whichKeyRows();
   ok(
-    rows.some(([key, desc]) => key == "e" && desc == "Explorer (Compact Mode)"),
+    rows.some(([key, desc]) => key == "e" && desc == "Explorer"),
     "mappings show their desc"
   );
   ok(
@@ -821,77 +917,6 @@ function sidebarShown() {
   return gZenCompactModeManager.isSidebarPotentiallyOpen();
 }
 
-add_task(async function test_leader_e_slides_the_sidebar_in_and_out() {
-  await setCompactMode(false);
-  const tab = await openPage();
-  const pressLeaderE = () => {
-    EventUtils.synthesizeKey(" ");
-    EventUtils.synthesizeKey("e");
-  };
-
-  pressLeaderE();
-  await TestUtils.waitForCondition(
-    () =>
-      gZenCompactModeManager.preference &&
-      !document.documentElement.hasAttribute("zen-compact-animating"),
-    "outside compact mode, <leader>e enters it"
-  );
-  ok(!sidebarShown(), "and the sidebar slides out");
-
-  pressLeaderE();
-  await TestUtils.waitForCondition(
-    () => gZenCompactModeManager.sidebar.hasAttribute("zen-user-show"),
-    "<leader>e slides it in, as hovering the screen edge does"
-  );
-  pressLeaderE();
-  await TestUtils.waitForCondition(
-    () => !sidebarShown(),
-    "and out again, as leaving it does"
-  );
-
-  BrowserTestUtils.removeTab(tab);
-  await setCompactMode(false);
-});
-
-add_task(async function test_leader_e_peek_auto_hides_when_idle() {
-  const { Lazyvimium } = ChromeUtils.importESModule(
-    "resource:///modules/lazyvimium/Lazyvimium.sys.mjs"
-  );
-  const explorer = Lazyvimium.plugins.get("ui").opts.explorer;
-  const autoHide = explorer.autoHide;
-  explorer.autoHide = 300;
-  const tab = await openPage();
-  await setCompactMode(true);
-  const sidebar = gZenCompactModeManager.sidebar;
-
-  await Lazyvimium.run("ui.explorer");
-  ok(sidebar.hasAttribute("zen-user-show"), "<leader>e slides the pane in");
-  await TestUtils.waitForCondition(
-    () => !sidebar.hasAttribute("zen-user-show"),
-    "it slides out by itself once idle"
-  );
-
-  await Lazyvimium.run("ui.explorer");
-  for (let i = 0; i < 4; i++) {
-    // Wait less than the idle delay between bits of activity.
-    // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
-    await new Promise(resolve => setTimeout(resolve, 150));
-    sidebar.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-  }
-  ok(
-    sidebar.hasAttribute("zen-user-show"),
-    "activity in the pane keeps it open past the idle delay"
-  );
-  await TestUtils.waitForCondition(
-    () => !sidebar.hasAttribute("zen-user-show"),
-    "until the activity stops"
-  );
-
-  explorer.autoHide = autoHide;
-  BrowserTestUtils.removeTab(tab);
-  await setCompactMode(false);
-});
-
 add_task(function test_vim_mode_defaults_to_compact_mode_hiding_both() {
   const defaults = Services.prefs.getDefaultBranch("");
   for (const name of [
@@ -951,7 +976,7 @@ add_task(async function test_boot_keeps_the_sidebar_hidden_on_the_empty_tab() {
   await SpecialPowers.popPrefEnv();
 });
 
-add_task(async function test_leader_e_hides_the_sidebar_on_the_empty_tab() {
+add_task(async function test_explorer_close_hides_sidebar_on_empty_tab() {
   const { Lazyvimium } = ChromeUtils.importESModule(
     "resource:///modules/lazyvimium/Lazyvimium.sys.mjs"
   );
@@ -967,10 +992,10 @@ add_task(async function test_leader_e_hides_the_sidebar_on_the_empty_tab() {
   );
   ok(sidebarShown(), "which is how it looked stuck");
 
-  await Lazyvimium.run("ui.explorer");
-  ok(!sidebarShown(), "<leader>e slides it out all the same");
-  await Lazyvimium.run("ui.explorer");
-  ok(sidebarShown(), "and back in");
+  await Lazyvimium.run("explorer.toggle");
+  ok(Lazyvimium.explorerFor(window).isOpen, "<leader>e opens the explorer");
+  await Lazyvimium.run("explorer.toggle");
+  ok(!sidebarShown(), "closing it slides the sidebar out all the same");
 
   gBrowser.selectedTab = tab;
   BrowserTestUtils.removeTab(tab);

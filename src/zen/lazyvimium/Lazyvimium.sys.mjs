@@ -4,6 +4,7 @@
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { LazyvimiumActions } from "resource:///modules/lazyvimium/core/LazyvimiumActions.sys.mjs";
+import { LazyvimiumKeyEngine } from "resource:///modules/lazyvimium/core/LazyvimiumKeyEngine.sys.mjs";
 import { LazyvimiumKeymap } from "resource:///modules/lazyvimium/core/LazyvimiumKeymap.sys.mjs";
 import { LazyvimiumKeys } from "resource:///modules/lazyvimium/core/LazyvimiumKeys.sys.mjs";
 import { LazyvimiumPlugins } from "resource:///modules/lazyvimium/core/LazyvimiumPlugins.sys.mjs";
@@ -15,6 +16,8 @@ import { LazyvimiumKeymapsSpec } from "resource:///modules/lazyvimium/config/Laz
 import { LazyvimiumOptions } from "resource:///modules/lazyvimium/config/LazyvimiumOptions.sys.mjs";
 import { LazyvimiumCoreSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumCore.sys.mjs";
 import { LazyvimiumEditSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumEdit.sys.mjs";
+import { LazyvimiumExplorerSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumExplorerSpec.sys.mjs";
+import { LazyvimiumToolbarSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumToolbarSpec.sys.mjs";
 import { LazyvimiumFindSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumFind.sys.mjs";
 import { LazyvimiumInputsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumInputs.sys.mjs";
 import { LazyvimiumLibrarySpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumLibrary.sys.mjs";
@@ -31,6 +34,12 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.sys.mjs",
+  LazyvimiumExplorer:
+    "resource:///modules/lazyvimium/ui/LazyvimiumExplorer.sys.mjs",
+  LazyvimiumMenuKeys:
+    "resource:///modules/lazyvimium/ui/LazyvimiumMenuKeys.sys.mjs",
+  LazyvimiumToolbar:
+    "resource:///modules/lazyvimium/ui/LazyvimiumToolbar.sys.mjs",
   LazyvimiumStatusline:
     "resource:///modules/lazyvimium/ui/LazyvimiumStatusline.sys.mjs",
   LazyvimiumWhichKey:
@@ -52,6 +61,8 @@ export const LAZYVIMIUM_SPECS = [
   LazyvimiumEditSpec,
   LazyvimiumFindSpec,
   LazyvimiumWindowsSpec,
+  LazyvimiumExplorerSpec,
+  LazyvimiumToolbarSpec,
   LazyvimiumLibrarySpec,
   LazyvimiumUiSpec,
   LazyvimiumSessionSpec,
@@ -72,6 +83,13 @@ const VIM_MODE_DEFAULTS = {
   "zen.view.compact.hide-tabbar": true,
   "zen.view.compact.hide-toolbar": true,
 };
+
+// The modes of the browser UI's own buffers, the sidebar's explorer and the
+// top bar, which run in the parent: their keys are typed in the browser UI,
+// not in a page.
+const CHROME_MODES = ["e", "t"];
+// The owner of the normal mode <leader> keys copied into those modes.
+const INHERITED_OWNER = "chrome-leader";
 
 const NORMAL_STATE = Object.freeze({
   mode: "n",
@@ -143,10 +161,11 @@ class LazyvimiumService {
   /** @type {WeakMap<Element, object>} */
   #states = new WeakMap();
   /**
-   * The statusline and which-key popup of each browser window, keyed by
-   * document, which a browser element reaches as ownerDocument.
+   * The statusline, which-key popup, explorer, toolbar and menu keys of each
+   * browser window, with the key engine of its explorer and toolbar modes,
+   * keyed by document, which a browser element reaches as ownerDocument.
    *
-   * @type {Map<Document, {statusline: object, whichKey: object}>}
+   * @type {Map<Document, {statusline: object, whichKey: object, explorer: object, toolbar: object, menuKeys: object, engine: LazyvimiumKeyEngine|null}>}
    */
   #windows = new Map();
 
@@ -197,12 +216,19 @@ class LazyvimiumService {
         this.reload();
         break;
       case LazyvimiumOptions.PREF_TIMEOUTLEN:
+        for (const ui of this.#windows.values()) {
+          ui.engine = null;
+        }
         this.#publish();
         break;
       case LazyvimiumOptions.PREF_ENABLED:
       case LazyvimiumOptions.PREF_STATUSLINE:
-        for (const { statusline } of this.#windows.values()) {
-          statusline.setVisible(this.#statuslineVisible);
+        for (const ui of this.#windows.values()) {
+          ui.statusline.setVisible(this.#statuslineVisible);
+          if (!LazyvimiumOptions.enabled) {
+            ui.explorer.close();
+            ui.toolbar.close();
+          }
         }
         break;
     }
@@ -220,7 +246,39 @@ class LazyvimiumService {
       extras: this.#user.extras,
       overrides: this.#user.overrides,
     });
+    this.#inheritLeaderKeys();
+    for (const ui of this.#windows.values()) {
+      if (!this.#activeBuffer(ui)) {
+        ui.engine = null;
+      }
+    }
     this.#publish();
+  }
+
+  // The explorer and the toolbar are buffers with keys of their own, and the
+  // <leader> keys work in them as anywhere else, the way LazyVim's explorer
+  // keeps them.
+  #inheritLeaderKeys() {
+    const keymap = this.keymap;
+    keymap.removeOwner(INHERITED_OWNER);
+    const [leader] = LazyvimiumKeys.parse("<leader>", {
+      leader: keymap.leader,
+    });
+    for (const mode of CHROME_MODES) {
+      for (const mapping of keymap.list("n")) {
+        if (mapping.tokens[0] == leader && !keymap.get(mode, mapping.lhs)) {
+          keymap.set(mode, mapping.lhs, mapping.rhs, {
+            desc: mapping.desc,
+            owner: INHERITED_OWNER,
+          });
+        }
+      }
+      for (const group of keymap.groups("n")) {
+        if (group.tokens[0] == leader) {
+          keymap.group(mode, group.lhs, group.name, { owner: INHERITED_OWNER });
+        }
+      }
+    }
   }
 
   async loadUserConfig() {
@@ -322,21 +380,104 @@ class LazyvimiumService {
       field: field === true,
     };
     this.#states.set(browser, state);
-    if (windowOf(browser)?.gBrowser?.selectedBrowser == browser) {
-      this.#showState(this.#windows.get(browser.ownerDocument), state);
+    const ui = this.#windows.get(browser.ownerDocument);
+    if (
+      windowOf(browser)?.gBrowser?.selectedBrowser == browser &&
+      ui &&
+      !this.#activeBuffer(ui)
+    ) {
+      this.#showState(ui, state);
     }
   }
 
   /**
-   * Show every key of the page's mode in which-key, for `<leader>?`.
+   * Show every key of the current mode in which-key, for `<leader>?`: the
+   * page's, or the explorer's or toolbar's while one is open.
    *
    * @param {Window} window
    * @param {Element} browser
    */
   showAllKeys(window, browser) {
-    this.#windows
-      .get(window.document)
-      ?.whichKey.showAll(this.keymap, this.stateFor(browser).mode);
+    const ui = this.#windows.get(window.document);
+    if (ui) {
+      const mode = this.#activeBuffer(ui)?.mode ?? this.stateFor(browser).mode;
+      ui.whichKey.showAll(this.keymap, mode);
+    }
+  }
+
+  /**
+   * @param {Window} window
+   * @returns {object|null} The window's LazyvimiumExplorer.
+   */
+  explorerFor(window) {
+    return this.#windows.get(window.document)?.explorer ?? null;
+  }
+
+  /**
+   * @param {Window} window
+   * @returns {object|null} The window's LazyvimiumToolbar.
+   */
+  toolbarFor(window) {
+    return this.#windows.get(window.document)?.toolbar ?? null;
+  }
+
+  // The browser UI buffer the keys go to, if one is open.
+  #activeBuffer(ui) {
+    return [ui.explorer, ui.toolbar].find(buffer => buffer?.isOpen) ?? null;
+  }
+
+  #stateOf(window, ui) {
+    const buffer = this.#activeBuffer(ui);
+    if (!buffer) {
+      return this.stateFor(window.gBrowser.selectedBrowser);
+    }
+    return {
+      mode: buffer.mode,
+      ...this.#chromeEngine(window, ui).pending,
+      field: false,
+      visual: !!buffer.visual,
+    };
+  }
+
+  #chromeEngine(window, ui) {
+    if (!ui.engine) {
+      ui.engine = new LazyvimiumKeyEngine({
+        keymap: this.keymap,
+        timeoutlen: LazyvimiumOptions.timeoutlen,
+        waitForPrefix: !!this.plugins.get("which-key")?.loaded,
+        onMatch: ({ mapping, count }) => {
+          const action = this.actions.get(mapping.rhs);
+          const args = count !== null && action?.params?.count ? { count } : {};
+          this.run(mapping.rhs, args, { window }).catch(e =>
+            console.error(`Lazyvimium: "${mapping.rhs}" failed`, e)
+          );
+        },
+        onStateChange: () => this.#showState(ui, this.#stateOf(window, ui)),
+      });
+      for (const mode of CHROME_MODES) {
+        ui.engine.defineMode(mode, { counts: true, passUnmapped: true });
+      }
+    }
+    const mode = this.#activeBuffer(ui)?.mode;
+    if (mode && ui.engine.mode != mode) {
+      ui.engine.setMode(mode);
+    }
+    return ui.engine;
+  }
+
+  // Keys typed while the explorer or the toolbar is open.
+  #bufferKey(window, ui, buffer, event) {
+    if (!event.isTrusted) {
+      return;
+    }
+    const route = buffer.routeKey(event);
+    if (route == "handled" || route == "other") {
+      return;
+    }
+    if (this.#chromeEngine(window, ui).feed(LazyvimiumKeys.fromEvent(event))) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }
 
   #showState(ui, state) {
@@ -426,11 +567,28 @@ class LazyvimiumService {
     const ui = {
       statusline: new lazy.LazyvimiumStatusline(window),
       whichKey: new lazy.LazyvimiumWhichKey(window),
+      menuKeys: new lazy.LazyvimiumMenuKeys(window),
+      explorer: null,
+      toolbar: null,
+      engine: null,
     };
+    const refresh = () => this.#showState(ui, this.#stateOf(window, ui));
+    // One buffer of the browser UI is open at a time.
+    const onChange = (buffer, other) => {
+      if (buffer.isOpen) {
+        other.close();
+      }
+      ui.engine?.reset();
+      refresh();
+    };
+    ui.explorer = new lazy.LazyvimiumExplorer(window, {
+      onChange: () => onChange(ui.explorer, ui.toolbar),
+    });
+    ui.toolbar = new lazy.LazyvimiumToolbar(window, {
+      onChange: () => onChange(ui.toolbar, ui.explorer),
+    });
     this.#windows.set(window.document, ui);
     ui.statusline.setVisible(this.#statuslineVisible);
-    const refresh = () =>
-      this.#showState(ui, this.stateFor(window.gBrowser.selectedBrowser));
     refresh();
     window.gBrowser.tabContainer.addEventListener("TabSelect", refresh);
     window.addEventListener(
@@ -439,7 +597,19 @@ class LazyvimiumService {
         if (ui.whichKey.pinned) {
           ui.whichKey.hide();
         }
-        this.#takeReservedKey(window, event);
+        // An open menu or panel takes the keys, with vim's j and k.
+        if (LazyvimiumOptions.enabled && ui.menuKeys.active) {
+          if (event.isTrusted) {
+            ui.menuKeys.handleKey(event);
+          }
+          return;
+        }
+        const buffer = this.#activeBuffer(ui);
+        if (buffer) {
+          this.#bufferKey(window, ui, buffer, event);
+        } else {
+          this.#takeReservedKey(window, event);
+        }
       },
       true
     );
