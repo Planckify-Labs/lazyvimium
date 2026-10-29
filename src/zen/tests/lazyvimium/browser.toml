@@ -16,4 +16,6 @@ support-files = [
 
 ["browser_lazyvimium_library.js"]
 
+["browser_lazyvimium_ublock.js"]
+
 ["browser_lazyvimium_vim_mode.js"]

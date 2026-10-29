@@ -2,7 +2,7 @@ diff --git a/testing/profiles/mochitest/user.js b/testing/profiles/mochitest/use
 index 782258420cdce901f182897b796731a1fdf69ecf..a762067169b1cf3cd05147f9e715eb0db56a3299 100644
 --- a/testing/profiles/mochitest/user.js
 +++ b/testing/profiles/mochitest/user.js
-@@ -36,3 +36,13 @@ user_pref("places.history.floodingPrevention.enabled", false);
+@@ -36,3 +36,15 @@ user_pref("places.history.floodingPrevention.enabled", false);
  // permission, and we can open it and wait for the user to give permission, then
  // don't do that.
  user_pref("geo.prompt.open_system_prefs", false);
@@ -16,3 +16,5 @@ index 782258420cdce901f182897b796731a1fdf69ecf..a762067169b1cf3cd05147f9e715eb0d
 +// tests on Zen's default layout.
 +user_pref("zen.view.compact.enable-at-startup", false);
 +user_pref("zen.view.compact.hide-toolbar", false);
++// Tests must not download uBlock Origin from AMO.
++user_pref("lazyvimium.ublock.enabled", false);

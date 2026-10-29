@@ -318,8 +318,24 @@ add_task(async function test_Welcome_Steps() {
   ok(true, "Welcome Search Step Test Finished");
 
   await TestUtils.waitForCondition(
+    () => currentPageContent()?.getAttribute("page") === "block-ads",
+    "the ad blocking page follows"
+  );
+  // The test profile keeps uBlock Origin from being downloaded, so the page
+  // starts on NO.
+  ok(
+    currentPageContent().querySelector("#zen-welcome-block-ads-no").checked,
+    "The ad blocking page should show the current choice"
+  );
+  await goNextWelcomePage("zen-generic-next");
+  ok(
+    !Services.prefs.getBoolPref("lazyvimium.ublock.enabled"),
+    "Turning ad blocking down should keep uBlock Origin away"
+  );
+
+  await TestUtils.waitForCondition(
     () => currentPageContent()?.getAttribute("page") === "essentials",
-    "the ad blocking page to be skipped when uBlock is unavailable"
+    "the essentials page follows"
   );
   ok(true, "Welcome Block Ads Step Test Finished");
 

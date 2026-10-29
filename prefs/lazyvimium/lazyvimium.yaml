@@ -14,6 +14,9 @@
 - name: lazyvimium.statusline.enabled
   value: true
 
+- name: lazyvimium.ublock.enabled
+  value: true # install uBlock Origin from AMO when it is missing; turned off when the user removes it
+
 - name: lazyvimium.agent.default
   value: "" # an agent id (claude, codex, cursor, antigravity, opencode); empty picks the first installed
 

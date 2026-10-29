@@ -53,10 +53,15 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumSession.sys.mjs",
     "plugins/LazyvimiumTabs.sys.mjs",
     "plugins/LazyvimiumToolbarSpec.sys.mjs",
+    "plugins/LazyvimiumUblockSpec.sys.mjs",
     "plugins/LazyvimiumUi.sys.mjs",
     "plugins/LazyvimiumWhichKeySpec.sys.mjs",
     "plugins/LazyvimiumWindows.sys.mjs",
     "plugins/LazyvimiumZenCommands.sys.mjs",
+]
+
+EXTRA_JS_MODULES.lazyvimium.ublock += [
+    "ublock/LazyvimiumUblock.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.lazyvimium.ui += [

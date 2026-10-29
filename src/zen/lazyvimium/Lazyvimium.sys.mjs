@@ -26,6 +26,7 @@ import { LazyvimiumNavigationSpec } from "resource:///modules/lazyvimium/plugins
 import { LazyvimiumScrollSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumScroll.sys.mjs";
 import { LazyvimiumSessionSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumSession.sys.mjs";
 import { LazyvimiumTabsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumTabs.sys.mjs";
+import { LazyvimiumUblockSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUblockSpec.sys.mjs";
 import { LazyvimiumUiSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUi.sys.mjs";
 import { LazyvimiumWhichKeySpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumWhichKeySpec.sys.mjs";
 import { LazyvimiumWindowsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumWindows.sys.mjs";
@@ -75,6 +76,7 @@ export const LAZYVIMIUM_SPECS = [
   LazyvimiumToolbarSpec,
   LazyvimiumLibrarySpec,
   LazyvimiumAgentSpec,
+  LazyvimiumUblockSpec,
   LazyvimiumUiSpec,
   LazyvimiumSessionSpec,
   LazyvimiumZenCommandsSpec,

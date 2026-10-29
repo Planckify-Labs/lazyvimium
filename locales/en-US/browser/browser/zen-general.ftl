@@ -69,6 +69,7 @@ zen-background-tab-opened-toast = New background tab opened!
 zen-workspace-renamed-toast = Workspace has been successfully renamed!
 zen-split-view-limit-toast = Can't add more panels to the split view!
 zen-sidebar-drag-collapsed-toast = Sidebar hidden! Use <span>{ $shortcut }</span> to bring the sidebar back.
+lazyvimium-ublock-missing-toast = uBlock Origin is turned off or not installed.
 
 zen-toggle-compact-mode-button =
     .label = Compact Mode

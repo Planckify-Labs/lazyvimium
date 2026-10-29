@@ -41,8 +41,8 @@ zen-welcome-essentials-title = Choose the apps you use most.
 zen-welcome-essentials-description = Select your favorite apps to keep them handy in your sidebar.
 
 zen-welcome-block-ads-title = Block ads and trackers?
-zen-welcome-block-ads-description = { -brand-short-name } can install uBlock Origin for you, so pages load cleaner and faster. You can remove it any time.
-zen-welcome-block-ads-yes = <strong>YES</strong>, block ads for me.
+zen-welcome-block-ads-description = { -brand-short-name } comes with uBlock Origin, so pages load cleaner and faster. You can remove it any time.
+zen-welcome-block-ads-yes = <strong>YES</strong>, keep blocking ads.
 zen-welcome-block-ads-no = <strong>NO</strong>, show me everything.
 
 zen-welcome-workspace-colors-title = Your space, your colors.

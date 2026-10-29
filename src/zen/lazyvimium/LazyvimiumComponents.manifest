@@ -5,3 +5,5 @@
 category browser-before-ui-startup resource:///modules/lazyvimium/Lazyvimium.sys.mjs Lazyvimium.init
 
 category browser-window-delayed-startup resource:///modules/lazyvimium/Lazyvimium.sys.mjs Lazyvimium.onWindowReady
+
+category browser-idle-startup resource:///modules/lazyvimium/ublock/LazyvimiumUblock.sys.mjs LazyvimiumUblock.init
