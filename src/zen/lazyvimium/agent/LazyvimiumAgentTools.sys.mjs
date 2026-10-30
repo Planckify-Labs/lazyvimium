@@ -7,7 +7,15 @@
 // switch between and close the window's tabs, each known by an id like t3,
 // and the page tools read and drive the tab it works on or any tab it
 // names. browser_action reaches every registry action marked for agents,
-// the same ones keymaps run.
+// the same ones keymaps run. The ui tools show tables and pages in the
+// panel (LazyvimiumAgentUi).
+
+import {
+  pageFromArgs,
+  tableFromArgs,
+  uiGuide,
+  uiToolDefinitions,
+} from "resource:///modules/lazyvimium/agent/LazyvimiumAgentUi.sys.mjs";
 
 const lazy = {};
 
@@ -86,7 +94,12 @@ export function tabIdOf(tab) {
   return id;
 }
 
-function findTab(window, id) {
+/**
+ * @param {Window} window
+ * @param {string} id An id like t3.
+ * @returns {Element|null} The tab it names.
+ */
+export function findTab(window, id) {
   return window.gBrowser.tabs.find(tab => gTabIds.get(tab) == id) ?? null;
 }
 
@@ -412,6 +425,7 @@ export function toolDefinitions(registry) {
         additionalProperties: false,
       },
     },
+    ...uiToolDefinitions(),
   ];
 }
 
@@ -450,6 +464,8 @@ export class LazyvimiumAgentToolbox {
    * @param {object} [options.log] The conversation's LazyvimiumAgentLog.
    * @param {WeakSet<Element>} [options.opened] The tabs the agent opened,
    *   which it closes without asking.
+   * @param {(ui: object) => string} [options.onUi] Show a table or page in
+   *   the panel; returns its id. Without it the ui tools refuse.
    */
   constructor({
     lazyvimium,
@@ -459,6 +475,7 @@ export class LazyvimiumAgentToolbox {
     confirm,
     log = null,
     opened = new WeakSet(),
+    onUi = null,
   }) {
     this.lazyvimium = lazyvimium;
     this.browser = browser;
@@ -467,6 +484,7 @@ export class LazyvimiumAgentToolbox {
     this.confirm = confirm;
     this.log = log;
     this.opened = opened;
+    this.onUi = onUi;
     this.window = browser()?.documentGlobal;
   }
 
@@ -527,8 +545,26 @@ export class LazyvimiumAgentToolbox {
         return this.#closeTab(args);
       case "browser_action":
         return this.#browserAction(args);
+      case "ui_table":
+      case "ui_show":
+        return this.#showUi(name, args);
+      case "ui_guide":
+        return { text: uiGuide(args.topic) };
     }
     throw new Error(`Unknown tool ${name}`);
+  }
+
+  // The table or page is its own row in the panel, so no step row.
+  #showUi(name, args) {
+    if (!this.onUi) {
+      throw new Error("There is no panel to show it in.");
+    }
+    const ui = name == "ui_table" ? tableFromArgs(args) : pageFromArgs(args);
+    const id = this.onUi(ui);
+    this.#lastTitle = `Showed ${quote(ui.title)}`;
+    return {
+      text: `The user sees it in the panel as ${quote(id)}; call ${name} with id ${quote(id)} to change it. Do not repeat what it shows in your answer.`,
+    };
   }
 
   // The browser of the tab the agent works on. If that tab was closed, the

@@ -242,6 +242,24 @@
   max-height: 75vh;
 }
 
+/* Scrollbars in lazyvimium's own panels: thin, in its pink over no track,
+   brighter while the mouse is on them. */
+:is(
+    .lazyvimium-which-key-list,
+    .lazyvimium-picker-list,
+    .lazyvimium-agent-log,
+    .lazyvimium-md pre,
+    .lazyvimium-md-table,
+    .lazyvimium-ui-scroll
+  ) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--lazyvimium-scrollbar) 45%, transparent) transparent;
+
+  &:hover {
+    scrollbar-color: var(--lazyvimium-scrollbar) transparent;
+  }
+}
+
 #lazyvimium-statusline {
   right: 12px;
   bottom: 12px;
@@ -458,6 +476,58 @@
       margin-inline: 0 var(--zen-element-separation, 8px);
     }
   }
+
+  &[resizing] {
+    user-select: none;
+  }
+}
+
+/* The panel's edge on the page's side: dragging it resizes the panel. */
+.lazyvimium-agent-grip {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+
+  #lazyvimium-agent-dock[side="right"] > & {
+    left: 0;
+  }
+
+  #lazyvimium-agent-dock[side="left"] > & {
+    right: 0;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 3px;
+    height: 40px;
+    border-radius: 2px;
+    background-color: var(--lazyvimium-accent);
+    opacity: 0;
+    translate: -50% -50%;
+    transition:
+      height 0.15s ease-out,
+      opacity 0.15s ease-out;
+  }
+
+  &:hover::before,
+  #lazyvimium-agent-dock[resizing] > &::before {
+    height: 72px;
+    opacity: 1;
+  }
+
+  &[disabled] {
+    cursor: default;
+
+    &::before {
+      display: none;
+    }
+  }
 }
 
 .lazyvimium-agent-header {
@@ -551,9 +621,11 @@
   gap: 10px;
   padding: 14px 16px 12px;
   overflow-y: auto;
+  /* The conversation scrolls only up and down; anything wide scrolls in
+     its own box. */
+  overflow-x: hidden;
   min-height: 0;
   flex: 1;
-  scrollbar-width: thin;
 }
 
 .lazyvimium-agent-empty {
@@ -624,6 +696,206 @@
     border-radius: 10px;
     background-color: color-mix(in srgb, var(--lazyvimium-agent-confirm) 18%, transparent);
     box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-confirm) 50%, transparent);
+  }
+
+  /* A table or page the agent shows (LazyvimiumAgentUiView). */
+  &[type="ui"] {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-border) 18%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-border) 70%, transparent);
+    white-space: normal;
+    overflow-wrap: normal;
+    /* Never wider than the log: what is wider scrolls inside it. */
+    min-width: 0;
+  }
+}
+
+/* In a narrow panel the filter and buttons go below the title rather than
+   squeeze it away. */
+.lazyvimium-ui-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.lazyvimium-ui-title {
+  flex: 1 0 10em;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lazyvimium-ui-count {
+  flex: none;
+  color: var(--lazyvimium-agent-muted);
+  font-size: 11px;
+}
+
+.lazyvimium-ui-filter,
+.lazyvimium-ui-button {
+  flex: none;
+  height: 24px;
+  border: 0.5px solid var(--lazyvimium-agent-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+
+  &:focus-visible {
+    outline: 2px solid var(--lazyvimium-accent);
+    outline-offset: 1px;
+  }
+}
+
+.lazyvimium-ui-filter {
+  width: 9em;
+  padding: 0 8px;
+
+  &[hidden] {
+    display: none;
+  }
+
+  &::placeholder {
+    color: var(--lazyvimium-agent-muted);
+    opacity: 1;
+  }
+}
+
+.lazyvimium-ui-button {
+  padding: 0 10px;
+  cursor: pointer;
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-border) 35%, transparent);
+  }
+}
+
+/* A table wider than the panel scrolls sideways in its own box, its cells
+   wrapping only between words. */
+.lazyvimium-ui-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.lazyvimium-ui-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+
+  & :is(th, td) {
+    padding: 4px 8px;
+    border-bottom: 0.5px solid var(--lazyvimium-md-rule);
+    text-align: start;
+    vertical-align: top;
+
+    &[numeric] {
+      text-align: end;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+
+  & th {
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  & tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  & tr[link] {
+    cursor: pointer;
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--lazyvimium-accent) 10%, transparent);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--lazyvimium-accent);
+      outline-offset: -2px;
+    }
+  }
+
+  /* Rows an update from the agent added. */
+  & tr[fresh] {
+    animation: lazyvimium-ui-fresh 1.6s ease-out;
+  }
+}
+
+@keyframes lazyvimium-ui-fresh {
+  from {
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 28%, transparent);
+  }
+}
+
+.lazyvimium-ui-sort {
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--lazyvimium-md-table-head);
+  font: inherit;
+  font-weight: 700;
+  text-align: inherit;
+  cursor: pointer;
+
+  th[numeric] > & {
+    text-align: end;
+  }
+
+  th[aria-sort="ascending"] > &::after {
+    content: " ▲";
+  }
+
+  th[aria-sort="descending"] > &::after {
+    content: " ▼";
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--lazyvimium-accent);
+    outline-offset: -2px;
+  }
+}
+
+.lazyvimium-ui-note {
+  margin: 0;
+  color: var(--lazyvimium-agent-muted);
+  font-size: 11px;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.lazyvimium-ui-placeholder {
+  color: var(--lazyvimium-agent-muted);
+  font-size: 12px;
+  animation: lazyvimium-agent-pulse 1.2s ease-in-out infinite;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* A page, in a content process of its own; its height follows the page. */
+.lazyvimium-ui-browser {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+
+  &[collapsed-page] {
+    visibility: hidden;
   }
 }
 
@@ -714,7 +986,6 @@
     border-inline-start: 2px solid var(--lazyvimium-accent);
     background-color: color-mix(in srgb, var(--lazyvimium-md-code-background) 85%, transparent);
     overflow-x: auto;
-    scrollbar-width: thin;
 
     &[data-lang]::before {
       content: attr(data-lang);
@@ -770,9 +1041,11 @@
     border-top: 1px solid var(--lazyvimium-md-rule);
   }
 
+  /* A table wider than the panel scrolls sideways. Its cells wrap only
+     between words: the message's overflow-wrap: anywhere would squeeze the
+     table to fit, a letter or two per line. */
   & .lazyvimium-md-table {
     overflow-x: auto;
-    scrollbar-width: thin;
   }
 
   & table {
@@ -784,9 +1057,11 @@
     padding: 4px 8px;
     border: 1px solid var(--lazyvimium-md-rule);
     text-align: start;
+    overflow-wrap: normal;
   }
 
   & th {
+    white-space: nowrap;
     color: var(--lazyvimium-md-table-head);
     font-weight: 700;
   }
@@ -1061,6 +1336,9 @@
   .lazyvimium-agent-chip::before,
   #lazyvimium-agent-pill::before,
   #lazyvimium-agent-handle::before,
+  .lazyvimium-agent-grip::before,
+  .lazyvimium-ui-table tr[fresh],
+  .lazyvimium-ui-placeholder,
   .browserStack[lazyvimium-agent-driving]::after {
     animation: none !important;
     transition: none !important;

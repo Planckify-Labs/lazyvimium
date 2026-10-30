@@ -9,6 +9,8 @@ firefox-appdir = "browser"
 
 ["test_agent.js"]
 
+["test_agent_ui.js"]
+
 ["test_key_engine.js"]
 
 ["test_keymap.js"]

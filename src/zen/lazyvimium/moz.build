@@ -13,11 +13,14 @@ EXTRA_JS_MODULES.lazyvimium.agent += [
     "agent/LazyvimiumAgents.sys.mjs",
     "agent/LazyvimiumAgentServer.sys.mjs",
     "agent/LazyvimiumAgentTools.sys.mjs",
+    "agent/LazyvimiumAgentUi.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.lazyvimium.actors += [
     "actors/LazyvimiumKeysChild.sys.mjs",
     "actors/LazyvimiumKeysParent.sys.mjs",
+    "actors/LazyvimiumUiChild.sys.mjs",
+    "actors/LazyvimiumUiParent.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.lazyvimium.config += [
@@ -66,6 +69,7 @@ EXTRA_JS_MODULES.lazyvimium.ublock += [
 
 EXTRA_JS_MODULES.lazyvimium.ui += [
     "ui/LazyvimiumAgentDock.sys.mjs",
+    "ui/LazyvimiumAgentUiView.sys.mjs",
     "ui/LazyvimiumExplorer.sys.mjs",
     "ui/LazyvimiumHints.sys.mjs",
     "ui/LazyvimiumLibraryView.sys.mjs",

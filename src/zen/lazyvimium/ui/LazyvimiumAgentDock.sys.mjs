@@ -15,6 +15,9 @@
 //   narrow, it lays out as float (or slide, after
 //   lazyvimium.agent.split-fallback) until there is room again.
 //
+// Dragging its edge on the page's side widens it, never narrower than it
+// first opens; beside the tab, only as far as the tab keeps room.
+//
 // Closed, a pill keeps showing that the agent is working on the tab or has
 // finished.
 
@@ -24,6 +27,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   LazyvimiumAgents:
     "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
   agentColor: "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
+  LazyvimiumAgentUiView:
+    "resource:///modules/lazyvimium/ui/LazyvimiumAgentUiView.sys.mjs",
   LazyvimiumPicker:
     "resource:///modules/lazyvimium/ui/LazyvimiumPicker.sys.mjs",
   LazyvimiumTheme: "resource:///modules/lazyvimium/ui/LazyvimiumTheme.sys.mjs",
@@ -48,6 +53,10 @@ const LAYOUTS = {
 
 // A page narrower than this beside the docked panel is too cramped to use.
 const MIN_PANE_WIDTH = 420;
+// The panel's width when it first opens, and the narrowest it gets.
+const MIN_WIDTH = 420;
+// A floating panel's inset on each side (lazyvimium.css).
+const FLOAT_INSET = 10;
 // How long the slid-in panel stays once the mouse leaves it, and how long the
 // mouse rests on the handle before it slides in, after Zen's compact sidebar
 // (zen.view.compact.sidebar-keep-hover.duration, hover-hack-delay).
@@ -72,7 +81,10 @@ function readPrefs() {
       Services.prefs.getStringPref(PREF_SIDE, "right") == "left"
         ? "left"
         : "right",
-    width: Math.max(280, Services.prefs.getIntPref(PREF_WIDTH, 420)),
+    width: Math.max(
+      MIN_WIDTH,
+      Services.prefs.getIntPref(PREF_WIDTH, MIN_WIDTH)
+    ),
     fallback: fallback == "slide" ? "slide" : "float",
   };
 }
@@ -90,6 +102,8 @@ export class LazyvimiumAgentDock {
   #hint;
   #pill;
   #handle;
+  #grip;
+  #uiView;
   #layoutButtons = new Map();
   #sideButton;
   #conversation = null;
@@ -109,6 +123,7 @@ export class LazyvimiumAgentDock {
   #picking = false;
   #renderQueued = false;
   #layoutQueued = false;
+  #resizing = false;
   // Each message's row, and what it showed when it was built.
   #rows = new WeakMap();
 
@@ -180,6 +195,9 @@ export class LazyvimiumAgentDock {
     this.#log = create("div", "lazyvimium-agent-log", this.#root);
     this.#log.setAttribute("role", "log");
     this.#log.setAttribute("aria-live", "polite");
+    this.#uiView = new lazy.LazyvimiumAgentUiView(window, {
+      onPrompt: text => this.#askFromPage(text),
+    });
 
     const composer = create("div", "lazyvimium-agent-composer", this.#root);
     this.#tabChip = create("div", "lazyvimium-agent-tab", composer);
@@ -189,6 +207,16 @@ export class LazyvimiumAgentDock {
     this.#input.addEventListener("keydown", event => this.#onKey(event));
     this.#input.addEventListener("input", () => this.#fitInput());
     this.#hint = create("div", "lazyvimium-agent-hint", composer);
+
+    this.#grip = create("div", "lazyvimium-agent-grip", this.#root);
+    this.#grip.setAttribute("role", "separator");
+    this.#grip.setAttribute("aria-orientation", "vertical");
+    this.#grip.addEventListener("pointerdown", event =>
+      this.#startResize(event)
+    );
+    this.#grip.addEventListener("dblclick", () =>
+      Services.prefs.clearUserPref(PREF_WIDTH)
+    );
 
     this.#root.addEventListener("mouseenter", () => {
       this.#hovered = true;
@@ -477,14 +505,14 @@ export class LazyvimiumAgentDock {
 
   // Layout.
 
-  // Whether the tab, and each of its split view panes, keeps at least
-  // MIN_PANE_WIDTH beside the docked panel.
-  #splitFits() {
+  // The widest the panel can be beside the tab while the tab, and each of
+  // its split view panes, keeps at least MIN_PANE_WIDTH.
+  #splitMaxWidth() {
     const window = this.#window;
     const panels = window.gBrowser.tabpanels;
     const total = panels?.getBoundingClientRect().width;
     if (!total) {
-      return true;
+      return Infinity;
     }
     const gap =
       parseFloat(
@@ -496,7 +524,6 @@ export class LazyvimiumAgentDock {
       this.#layout == "split" && !this.#root.hidden
         ? this.#root.getBoundingClientRect().width + gap
         : 0;
-    const available = total + docked - (this.#prefs.width + gap);
     let share = 1;
     const splitter = window.gZenViewSplitter;
     if (splitter?.splitViewActive) {
@@ -508,7 +535,15 @@ export class LazyvimiumAgentDock {
         }
       }
     }
-    return share * available >= MIN_PANE_WIDTH;
+    // Each pane keeps its share of what the panel leaves of the tab box.
+    return Math.floor(total + docked - gap - MIN_PANE_WIDTH / share);
+  }
+
+  // The widest the panel can get in the layout in use.
+  #maxWidth() {
+    return this.#layout == "split"
+      ? this.#splitMaxWidth()
+      : this.#host.clientWidth - 2 * FLOAT_INSET;
   }
 
   #queueLayout() {
@@ -523,15 +558,30 @@ export class LazyvimiumAgentDock {
   }
 
   #applyLayout() {
-    const { layout: picked, side, width, fallback } = this.#prefs;
-    const layout = picked == "split" && !this.#splitFits() ? fallback : picked;
+    const { layout: picked, side, fallback } = this.#prefs;
+    const splitMax = picked == "split" ? this.#splitMaxWidth() : Infinity;
+    const layout = splitMax < MIN_WIDTH ? fallback : picked;
     const changed = layout != this.#layout;
     this.#layout = layout;
     for (const element of [this.#root, this.#pill, this.#handle]) {
       element.setAttribute("layout", layout);
       element.setAttribute("side", side);
     }
-    this.#root.style.setProperty("--lazyvimium-agent-width", `${width}px`);
+    // Beside the tab the panel gives up its width, down to MIN_WIDTH, before
+    // the tab gets too narrow.
+    const width =
+      layout == "split"
+        ? Math.min(this.#prefs.width, splitMax)
+        : this.#prefs.width;
+    if (!this.#resizing) {
+      this.#root.style.setProperty("--lazyvimium-agent-width", `${width}px`);
+    }
+    const fixed = layout == "split" && splitMax <= MIN_WIDTH;
+    this.#grip.toggleAttribute("disabled", fixed);
+    this.#grip.setAttribute("aria-disabled", String(fixed));
+    this.#grip.title = fixed
+      ? "No room to widen it beside this tab: float it to make it wider"
+      : "Drag to resize · double-click for the narrowest";
     const fellBack = picked == "split" && layout != "split";
     this.#root.toggleAttribute("fallback", fellBack);
     for (const [name, button] of this.#layoutButtons) {
@@ -552,6 +602,47 @@ export class LazyvimiumAgentDock {
       this.#cancelHide();
     }
     this.#syncPill();
+  }
+
+  // Dragging the edge on the page's side widens or narrows the panel; the
+  // width is kept for every layout once the mouse lets go.
+  #startResize(event) {
+    if (event.button != 0 || this.#grip.hasAttribute("disabled")) {
+      return;
+    }
+    event.preventDefault();
+    const grip = this.#grip;
+    const startX = event.clientX;
+    const start = Math.round(this.#root.getBoundingClientRect().width);
+    const max = Math.max(MIN_WIDTH, this.#maxWidth());
+    const sign = this.#prefs.side == "right" ? -1 : 1;
+    let width = start;
+    const move = moved => {
+      width = Math.round(
+        Math.min(
+          max,
+          Math.max(MIN_WIDTH, start + sign * (moved.clientX - startX))
+        )
+      );
+      this.#root.style.setProperty("--lazyvimium-agent-width", `${width}px`);
+    };
+    // Letting go releases the capture, as does anything that steals it.
+    const end = () => {
+      grip.removeEventListener("pointermove", move);
+      this.#resizing = false;
+      this.#root.removeAttribute("resizing");
+      if (width != start) {
+        Services.prefs.setIntPref(PREF_WIDTH, width);
+      }
+      if (!this.#hovered) {
+        this.#scheduleHide();
+      }
+    };
+    this.#resizing = true;
+    this.#root.setAttribute("resizing", "");
+    grip.setPointerCapture(event.pointerId);
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", end, { once: true });
   }
 
   #show() {
@@ -635,6 +726,7 @@ export class LazyvimiumAgentDock {
       this.#layout != "slide" ||
       !this.#open ||
       this.#picking ||
+      this.#resizing ||
       this.#conversation?.pendingConfirm
     ) {
       return;
@@ -806,6 +898,34 @@ export class LazyvimiumAgentDock {
     });
   }
 
+  /**
+   * A request from a page the agent shows in the panel
+   * (LazyvimiumUiParent).
+   *
+   * @param {Element} browser The page's browser.
+   * @param {string} name
+   * @param {object} data
+   * @returns {true|string} true, or why not.
+   */
+  uiRequest(browser, name, data) {
+    return this.#uiView.request(browser, name, data);
+  }
+
+  // A page's follow-up question, sent as if the user typed it.
+  #askFromPage(text) {
+    const conversation = this.#conversation;
+    if (!conversation) {
+      return "no agent to ask.";
+    }
+    if (conversation.running) {
+      return `${conversation.agent.name} is still working; ask again when it is done.`;
+    }
+    conversation.send(text).catch(e => {
+      console.error("Lazyvimium: the agent turn failed", e);
+    });
+    return true;
+  }
+
   #fitInput() {
     this.#input.style.height = "auto";
     this.#input.style.height = `${Math.min(this.#input.scrollHeight, 160)}px`;
@@ -870,6 +990,7 @@ export class LazyvimiumAgentDock {
       child.remove();
       child = next;
     }
+    this.#uiView.attach(this.#log);
     if (atBottom) {
       this.#log.scrollTop = this.#log.scrollHeight;
     }
@@ -911,17 +1032,23 @@ export class LazyvimiumAgentDock {
       message.detail,
       streaming,
       message.text,
+      message.revision,
     ].join("\u0000");
     const cached = this.#rows.get(message);
     if (cached?.key == key) {
       return cached.row;
     }
     let row = cached?.row;
-    if (!row || message.type != "agent") {
+    // An answer and a table or page keep their row: a page's browser and a
+    // table's filter box live in it.
+    if (!row || (message.type != "agent" && message.type != "ui")) {
       row = this.#create("div", "lazyvimium-agent-message");
       row.setAttribute("type", message.type);
     }
     switch (message.type) {
+      case "ui":
+        this.#uiView.update(row, message);
+        break;
       case "agent":
         row.classList.add("lazyvimium-md");
         row.toggleAttribute("streaming", streaming);

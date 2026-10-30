@@ -294,12 +294,17 @@ add_task(async function test_dock_asks_the_agent_about_the_tab() {
     "it shows the tab it asks about"
   );
 
+  // A fast turn can glow for less than one poll: watch the attribute from
+  // before the request.
+  const glowed = BrowserTestUtils.waitForMutationCondition(
+    browser,
+    { attributeFilter: ["lazyvimium-agent-driving"] },
+    () => browser.hasAttribute("lazyvimium-agent-driving")
+  );
   EventUtils.sendString("press go");
   EventUtils.synthesizeKey("KEY_Enter");
-  await TestUtils.waitForCondition(
-    () => browser.hasAttribute("lazyvimium-agent-driving"),
-    "the tab glows while the agent works"
-  );
+  await glowed;
+  ok(true, "the tab glows while the agent works");
   await TestUtils.waitForCondition(
     () => dockElement.textContent.includes("Clicked it"),
     "the agent's answer lands in the dock",
@@ -614,13 +619,13 @@ add_task(async function test_dock_layouts() {
   await SpecialPowers.pushPrefEnv({
     set: [
       ["lazyvimium.agent.layout", "split"],
-      ["lazyvimium.agent.width", 360],
+      ["lazyvimium.agent.width", 420],
     ],
   });
   await openDock(tab);
   const root = dockElement();
   Assert.equal(root.parentNode.id, "zen-tabbox-wrapper");
-  if (fullWidth - 360 >= 440) {
+  if (fullWidth - 420 >= 440) {
     Assert.equal(root.getAttribute("layout"), "split");
     await TestUtils.waitForCondition(
       () => panels.getBoundingClientRect().width < fullWidth - 300,
@@ -668,14 +673,36 @@ add_task(async function test_dock_layouts() {
       "Escape goes back to the page"
     );
     ok(!root.hidden, "and the panel stays beside it");
+
+    await SpecialPowers.pushPrefEnv({
+      set: [["lazyvimium.agent.width", Math.ceil(fullWidth)]],
+    });
+    Assert.equal(
+      root.getAttribute("layout"),
+      "split",
+      "a panel wider than the room gives up its width instead of floating"
+    );
+    await Promise.all(
+      root.getAnimations().map(animation => animation.finished)
+    );
+    Assert.greaterOrEqual(
+      Math.ceil(panels.getBoundingClientRect().width),
+      420,
+      "and the tab keeps its room"
+    );
+    await SpecialPowers.popPrefEnv();
   }
 
-  await SpecialPowers.pushPrefEnv({
-    set: [["lazyvimium.agent.width", Math.ceil(fullWidth)]],
-  });
-  Assert.equal(
-    root.getAttribute("layout"),
-    "float",
+  // Four panes side by side leave no room beside any of them.
+  const others = [await openPage(), await openPage(), await openPage()];
+  const splitDone = BrowserTestUtils.waitForEvent(
+    window,
+    "ZenViewSplitter:SplitViewActivated"
+  );
+  gZenViewSplitter.splitTabs([tab, ...others], "vsep", 0);
+  await splitDone;
+  await TestUtils.waitForCondition(
+    () => root.getAttribute("layout") == "float",
     "with no room beside the tab it floats"
   );
   ok(root.hasAttribute("fallback"));
@@ -684,10 +711,19 @@ add_task(async function test_dock_layouts() {
     "true",
     "split stays picked"
   );
+  ok(
+    !root.querySelector(".lazyvimium-agent-grip").hasAttribute("disabled"),
+    "floating, it can still be widened"
+  );
+  gZenViewSplitter.unsplitCurrentView();
+  for (const other of others) {
+    BrowserTestUtils.removeTab(other);
+  }
+  gBrowser.selectedTab = tab;
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["lazyvimium.agent.width", 360],
+      ["lazyvimium.agent.width", 420],
       ["lazyvimium.agent.layout", "float"],
       ["lazyvimium.agent.side", "left"],
     ],
@@ -712,6 +748,122 @@ add_task(async function test_dock_layouts() {
   );
   await SpecialPowers.popPrefEnv();
   await SpecialPowers.popPrefEnv();
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_dock_resizes_from_its_inner_edge() {
+  await scriptedAgent([]);
+  registerCleanupFunction(async () => {
+    // Dragging and double-clicking set the pref themselves.
+    Services.prefs.clearUserPref("lazyvimium.agent.width");
+    if (!dockElement().hidden) {
+      await closeDock();
+    }
+  });
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["lazyvimium.agent.layout", "float"],
+      ["lazyvimium.agent.side", "right"],
+    ],
+  });
+  const tab = await openPage();
+  await openDock(tab);
+  const root = dockElement();
+  const grip = root.querySelector(".lazyvimium-agent-grip");
+  await Promise.all(root.getAnimations().map(animation => animation.finished));
+  const width = () => Math.round(root.getBoundingClientRect().width);
+  Assert.equal(width(), 420, "it opens at its narrowest");
+
+  // Synthesized coordinates are from the grip, as it is when each is sent.
+  const drag = by => {
+    EventUtils.synthesizeMouse(grip, 4, 100, { type: "mousedown" });
+    EventUtils.synthesizeMouse(grip, 4 + by, 100, { type: "mousemove" });
+    EventUtils.synthesizeMouse(grip, 4, 100, { type: "mouseup" });
+  };
+  drag(-100);
+  await TestUtils.waitForCondition(
+    () => Services.prefs.getIntPref("lazyvimium.agent.width") == 520,
+    "dragging the edge toward the page widens it"
+  );
+  Assert.equal(width(), 520);
+  drag(300);
+  await TestUtils.waitForCondition(
+    () => Services.prefs.getIntPref("lazyvimium.agent.width") == 420,
+    "but never narrower than it opened"
+  );
+  drag(-60);
+  await TestUtils.waitForCondition(() => width() == 480, "wider again");
+  EventUtils.synthesizeMouse(grip, 4, 100, { clickCount: 1 });
+  EventUtils.synthesizeMouse(grip, 4, 100, { clickCount: 2 });
+  await TestUtils.waitForCondition(
+    () => !Services.prefs.prefHasUserValue("lazyvimium.agent.width"),
+    "a double-click takes it back to its narrowest"
+  );
+  Assert.equal(width(), 420);
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["lazyvimium.agent.side", "left"]],
+  });
+  Assert.greater(
+    grip.getBoundingClientRect().left,
+    root.getBoundingClientRect().left + 400,
+    "on the left the edge is on its right"
+  );
+  drag(80);
+  await TestUtils.waitForCondition(
+    () => Services.prefs.getIntPref("lazyvimium.agent.width") == 500,
+    "and dragging it right widens it"
+  );
+  await SpecialPowers.popPrefEnv();
+
+  // From the agent's answers: a table wider than the panel squeezed to a
+  // letter or two per line instead of scrolling.
+  const conversation = LazyvimiumAgents.conversationFor(tab.linkedBrowser);
+  const columns = [
+    "Laptop",
+    "Price",
+    "Weight",
+    "Battery",
+    "Display",
+    "Ports",
+    "Keyboard",
+    "Webcam",
+    "Speakers",
+    "Warranty",
+  ];
+  conversation.messages.push({
+    type: "agent",
+    text: [
+      `| ${columns.join(" | ")} |`,
+      `|${columns.map(() => "---").join("|")}|`,
+      "| ThinkPad X1 Carbon | $1,749 | 1.12 kg | 15 hours | 14 inch OLED | Thunderbolt 4 | Backlit | 1080p | Dolby Atmos | 3 years |",
+    ].join("\n"),
+  });
+  conversation.changed();
+  const scroller = await TestUtils.waitForCondition(
+    () => root.querySelector(".lazyvimium-md-table"),
+    "the table is drawn"
+  );
+  Assert.greater(
+    scroller.scrollWidth,
+    scroller.clientWidth,
+    "the table scrolls sideways"
+  );
+  const header = scroller.querySelector("th");
+  Assert.less(
+    header.getBoundingClientRect().height,
+    30,
+    "its header stays on one line"
+  );
+  Assert.notEqual(
+    getComputedStyle(scroller).scrollbarColor,
+    "auto",
+    "in lazyvimium's scrollbar colors"
+  );
+  conversation.messages.length = 0;
+  conversation.changed();
+
+  await closeDock();
   await SpecialPowers.popPrefEnv();
   BrowserTestUtils.removeTab(tab);
 });

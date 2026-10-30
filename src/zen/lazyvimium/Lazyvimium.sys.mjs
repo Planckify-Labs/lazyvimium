@@ -790,6 +790,27 @@ class LazyvimiumService {
         safeForUntrustedWebProcess: true,
         enablePreference: LazyvimiumOptions.PREF_ENABLED,
       },
+      // The pages the agent shows in its panel, whose browsers are in their
+      // own message manager group (LazyvimiumAgentUiView).
+      LazyvimiumUi: {
+        parent: {
+          esModuleURI:
+            "resource:///modules/lazyvimium/actors/LazyvimiumUiParent.sys.mjs",
+        },
+        child: {
+          esModuleURI:
+            "resource:///modules/lazyvimium/actors/LazyvimiumUiChild.sys.mjs",
+          events: {
+            DOMDocElementInserted: {},
+            click: { capture: true },
+          },
+        },
+        // The page is the frame of a shell document.
+        allFrames: true,
+        messageManagerGroups: ["lazyvimium-ui"],
+        // The parent checks every request again (LazyvimiumAgentUiView).
+        safeForUntrustedWebProcess: true,
+      },
     });
   }
 

@@ -71,6 +71,8 @@ export const LAZYVIMIUM_ROLES = {
   success: "green",
   warning: "yellow",
   error: "red",
+  // The thumb of the scrollbars in lazyvimium's own panels.
+  scrollbar: "accent",
   // The agent's answers, as render-markdown.nvim draws them in tokyonight:
   // each heading level in its own hue.
   "md-h1": "blue",

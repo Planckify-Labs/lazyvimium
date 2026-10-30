@@ -18,10 +18,15 @@ import {
 import { LazyvimiumAgentLog } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentLog.sys.mjs";
 import { LazyvimiumAgentServer } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentServer.sys.mjs";
 import {
+  pageHeight,
+  partialFields,
+} from "resource:///modules/lazyvimium/agent/LazyvimiumAgentUi.sys.mjs";
+import {
   LazyvimiumAgentToolbox,
   tabIdOf,
 } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentTools.sys.mjs";
 import { LazyvimiumTheme } from "resource:///modules/lazyvimium/ui/LazyvimiumTheme.sys.mjs";
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
 export const PREF_DEFAULT_AGENT = "lazyvimium.agent.default";
 // lazyvimium.agent.model.<agent id>: the model each agent runs with.
@@ -29,16 +34,23 @@ export const PREF_MODEL = "lazyvimium.agent.model.";
 
 /**
  * @typedef {object} LazyvimiumAgentMessage
- * @property {"user"|"agent"|"step"|"tool"|"confirm"|"error"|"note"} type
+ * @property {"user"|"agent"|"step"|"tool"|"confirm"|"error"|"note"|"ui"} type
  *   Who said it: the user, the agent, a browser tool call, one of the
- *   agent's own tools, a question for the user, or the browser.
+ *   agent's own tools, a question for the user, the browser, or a table or
+ *   page the agent shows.
  * @property {string} text What the dock shows.
  * @property {string} [status] For step: running, done or failed; for
- *   confirm: pending, allowed or declined.
+ *   confirm: pending, allowed or declined; for ui: draft while the agent
+ *   still writes it, then done.
  * @property {(allowed: boolean) => void} [answer] For a pending confirm.
+ * @property {object} [ui] For ui: what LazyvimiumAgentUi's tableFromArgs
+ *   or pageFromArgs returned.
+ * @property {number} [revision] For ui: changed on every update.
  */
 
 let gRunIds = 0;
+// How often a page the agent is writing redraws.
+const DRAFT_REDRAW_MS = 150;
 
 export class LazyvimiumAgentConversation {
   /** @type {LazyvimiumAgentMessage[]} */
@@ -54,6 +66,11 @@ export class LazyvimiumAgentConversation {
   log = null;
 
   #turns = 0;
+  #uiCount = 0;
+  // The pages the agent is writing this turn, by the harness's key:
+  // {message, json}.
+  #drafts = new Map();
+  #draftTimer = null;
   #listeners = new Set();
   #browser;
   #service;
@@ -186,6 +203,7 @@ export class LazyvimiumAgentConversation {
       confirm: question => this.#confirm(question),
       log,
       opened: this.opened,
+      onUi: ui => this.#onUi(ui),
     });
     const token = LazyvimiumAgentServer.open(toolbox);
     this.#starting = true;
@@ -240,6 +258,9 @@ export class LazyvimiumAgentConversation {
             current = null;
             this.#push({ type: "tool", text: event.name });
             break;
+          case "ui-draft":
+            this.#onDraft(event.key, event.json);
+            break;
           case "done":
             if (event.error) {
               this.#push({ type: "error", text: event.error });
@@ -262,6 +283,13 @@ export class LazyvimiumAgentConversation {
         message.answer(false);
       }
     }
+    // Pages the agent started but never sent.
+    clearTimeout(this.#draftTimer);
+    this.#draftTimer = null;
+    this.#drafts.clear();
+    this.messages = this.messages.filter(
+      message => !(message.type == "ui" && message.status == "draft")
+    );
     this.run = null;
     this.unseen = true;
     this.#service.setDriving(this, false);
@@ -290,6 +318,79 @@ export class LazyvimiumAgentConversation {
     message.status = step.status;
     message.detail = step.detail;
     this.changed();
+  }
+
+  // A table or page from the ui tools. One with the id of an earlier one
+  // takes its place; a page takes the place of its own draft.
+  #onUi(ui) {
+    ui.id ||= `${ui.kind}-${++this.#uiCount}`;
+    const draft =
+      ui.kind == "page"
+        ? this.messages.findLast(m => m.type == "ui" && m.status == "draft")
+        : null;
+    let message = this.messages.findLast(
+      m => m.type == "ui" && m.status == "done" && m.ui.id == ui.id
+    );
+    if (message && draft) {
+      this.messages.splice(this.messages.indexOf(draft), 1);
+    }
+    message ??= draft;
+    if (draft) {
+      for (const [key, entry] of this.#drafts) {
+        if (entry.message == draft) {
+          this.#drafts.delete(key);
+        }
+      }
+    }
+    if (!message) {
+      // Drawn by the changed() below, once it has its ui.
+      message = { type: "ui", revision: 0 };
+      this.messages.push(message);
+    }
+    message.ui = ui;
+    message.text = ui.title;
+    message.status = "done";
+    message.revision++;
+    this.changed();
+    return ui.id;
+  }
+
+  // A piece of a ui_show call as the agent writes it (Claude only): the
+  // page shows what has arrived, redrawn now and then.
+  #onDraft(key, json) {
+    let entry = this.#drafts.get(key);
+    if (!entry) {
+      entry = {
+        message: this.#push({
+          type: "ui",
+          status: "draft",
+          text: "",
+          revision: 0,
+          ui: { kind: "page", title: "", css: "", html: "", js: "" },
+        }),
+        json: "",
+      };
+      this.#drafts.set(key, entry);
+    }
+    entry.json += json ?? "";
+    const { fields, open } = partialFields(entry.json);
+    const ui = entry.message.ui;
+    ui.title = typeof fields.title == "string" ? fields.title : "";
+    ui.height = pageHeight(fields.height);
+    // The css shows once it is whole, as upstream's placeholder waits for
+    // it; the html as it comes.
+    ui.css = open == "css" ? "" : String(fields.css ?? "");
+    ui.html = open == "css" ? "" : String(fields.html ?? "");
+    entry.message.text = ui.title;
+    if (!this.#draftTimer) {
+      this.#draftTimer = setTimeout(() => {
+        this.#draftTimer = null;
+        for (const { message } of this.#drafts.values()) {
+          message.revision++;
+        }
+        this.changed();
+      }, DRAFT_REDRAW_MS);
+    }
   }
 
   #confirm(question) {

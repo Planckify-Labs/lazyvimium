@@ -27,7 +27,7 @@
   value: "right" # the side the agent panel slides in from: left or right
 
 - name: lazyvimium.agent.width
-  value: 420 # the agent panel's width, in pixels
+  value: 420 # the agent panel's width, in pixels; dragging its inner edge sets it, and it never gets narrower than 420
 
 - name: lazyvimium.agent.split-fallback
   value: "float" # how a split agent panel lays out while the tab has no room for it: float or slide

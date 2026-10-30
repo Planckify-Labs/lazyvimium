@@ -9,6 +9,11 @@
 // own. A driver only knows its CLI's command line and event shapes; the run
 // below is the same for every agent.
 
+import {
+  UI_INSTRUCTIONS,
+  UI_TOOLS,
+} from "resource:///modules/lazyvimium/agent/LazyvimiumAgentUi.sys.mjs";
+
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -49,6 +54,7 @@ const OWN_TOOLS = [
   "tab_switch",
   "tab_close",
   "browser_action",
+  ...UI_TOOLS,
 ];
 
 // Agents' plumbing rather than work: Claude Code loads deferred tools,
@@ -75,7 +81,8 @@ Working on a page, after the rules browser-use's jev agent works by:
 - Do not click a checkbox, switch or radio that is already in the state you want.
 - If an action changed nothing, do not repeat it; try something else or page_wait if the page is still working. Stop scrolling when a scroll says you are at the end.
 - You are done only when the page shows that everything asked for is done.
-Prefer opening a tab of your own over leaving the user's page when a task needs another site, and close the tabs you opened once they are no longer needed. Observe before you act. Ids stay valid only while the element is unchanged; if a call says the page changed, observe again. Do not use shell, file or code tools for the task. Never enter passwords or payment details: ask the user to do that. When you are done, answer in a few sentences.`;
+Prefer opening a tab of your own over leaving the user's page when a task needs another site, and close the tabs you opened once they are no longer needed. Observe before you act. Ids stay valid only while the element is unchanged; if a call says the page changed, observe again. Do not use shell, file or code tools for the task. Never enter passwords or payment details: ask the user to do that. When you are done, answer in a few sentences.
+${UI_INSTRUCTIONS}`;
 
 function ownTool(name) {
   return typeof name == "string" && OWN_TOOLS.some(tool => name.endsWith(tool));
@@ -107,7 +114,7 @@ function tomlString(value) {
 
 /**
  * @typedef {object} LazyvimiumAgentEvent
- * @property {"session"|"text"|"tool"|"done"} type What happened.
+ * @property {"session"|"text"|"tool"|"ui-draft"|"done"} type What happened.
  * @property {string} [id] For session: the agent's id to resume.
  * @property {string} [text] For text.
  * @property {boolean} [delta] For text: a piece of the current message.
@@ -115,6 +122,8 @@ function tomlString(value) {
  *   replaces the pieces streamed so far.
  * @property {string} [name] For tool: one of the agent's own tools.
  * @property {*} [input] For tool: what the agent passed it.
+ * @property {number} [key] For ui-draft: which ui_show call of the turn.
+ * @property {string} [json] For ui-draft: the next piece of its input.
  * @property {string|null} [error] For done.
  */
 
@@ -231,9 +240,36 @@ export const LAZYVIMIUM_DRIVERS = {
         ],
       };
     },
-    parse(event) {
+    parse(event, state = {}) {
       if (event.type == "stream_event") {
-        const { type, delta } = event.event ?? {};
+        const { type, index, delta, content_block: block } = event.event ?? {};
+        // A ui_show call as it is written: its input's JSON arrives in
+        // pieces, so the panel can show the page while it is written.
+        // Block indices start again with each message.
+        if (type == "message_start") {
+          state.uiBlocks = new Map();
+        } else if (
+          type == "content_block_start" &&
+          block?.type == "tool_use" &&
+          /(?:^|__)ui_show$/.test(block.name ?? "")
+        ) {
+          state.uiBlocks ??= new Map();
+          state.uiKeys = (state.uiKeys ?? 0) + 1;
+          state.uiBlocks.set(index, state.uiKeys);
+          return [{ type: "ui-draft", key: state.uiKeys, json: "" }];
+        } else if (
+          type == "content_block_delta" &&
+          delta?.type == "input_json_delta" &&
+          state.uiBlocks?.has(index)
+        ) {
+          return [
+            {
+              type: "ui-draft",
+              key: state.uiBlocks.get(index),
+              json: String(delta.partial_json ?? ""),
+            },
+          ];
+        }
         return type == "content_block_delta" &&
           delta?.type == "text_delta" &&
           delta.text
@@ -548,6 +584,8 @@ export class LazyvimiumAgentRun {
   #log;
   #startedAt = 0;
   #done = Promise.withResolvers();
+  // What a driver's parse() keeps between lines of this run.
+  #parseState = {};
 
   /**
    * @param {object} options
@@ -698,8 +736,11 @@ export class LazyvimiumAgentRun {
     } catch {
       return;
     }
-    for (const parsed of this.driver.parse(event)) {
-      this.#log?.write("event", { event: parsed });
+    for (const parsed of this.driver.parse(event, this.#parseState)) {
+      // A page's pieces are in the stdout lines already.
+      if (parsed.type != "ui-draft") {
+        this.#log?.write("event", { event: parsed });
+      }
       if (parsed.type == "done") {
         this.#finish(parsed.error ?? null);
       } else if (!this.#finished) {

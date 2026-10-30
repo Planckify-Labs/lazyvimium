@@ -87,7 +87,7 @@ export async function handleMcpMessage(session, message) {
           version: String(Services.appinfo.version || "0"),
         },
         instructions:
-          "Tools for the browser tab the user asked from. Observe the page before acting on it.",
+          "Tools for the browser tab the user asked from. Observe the page before acting on it. Show comparisons and lists in the user's panel with ui_table, and charts, diagrams and tools with ui_show (read ui_guide first), rather than writing them out.",
       });
     }
     case "ping":
