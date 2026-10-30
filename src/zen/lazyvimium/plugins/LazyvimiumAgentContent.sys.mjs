@@ -48,8 +48,148 @@ const EDITABLE_ROLES = new Set(["textbox", "searchbox", "spinbutton"]);
 const MAX_ELEMENTS = 250;
 const MAX_TEXT = 6000;
 const MAX_OPTIONS = 30;
+const MIN_FRAME_SIZE = 8;
 const REVEAL_TIMEOUT_MS = 400;
 const SHOW_TEXT = 4; // NodeFilter.SHOW_TEXT
+const MAX_OUTLINE = 60;
+const TREE_TIMEOUT_MS = 300;
+// Names, roles and states from Gecko's accessibility tree instead of this
+// file's own reading of the DOM. Turning the accessibility engine on costs
+// the process some layout work, so it can be turned off.
+const PREF_A11Y = "lazyvimium.agent.a11y";
+
+// Landmarks and headings, the page's outline.
+const LANDMARK_ROLES = new Set([
+  "banner",
+  "complementary",
+  "contentinfo",
+  "dialog",
+  "alertdialog",
+  "form",
+  "main",
+  "navigation",
+  "region",
+  "search",
+]);
+const IMPLICIT_LANDMARKS = {
+  header: "banner",
+  nav: "navigation",
+  main: "main",
+  aside: "complementary",
+  footer: "contentinfo",
+  dialog: "dialog",
+  form: "form",
+};
+const OUTLINE_SELECTOR = [
+  "h1,h2,h3,h4,h5,h6,header,nav,main,aside,footer,dialog,form",
+  '[role="heading"]',
+  ...[...LANDMARK_ROLES].map(role => `[role="${role}"]`),
+].join(",");
+
+let gA11yService;
+
+// Asking for the service turns the accessibility engine on in this process,
+// for every page in it, until the browser restarts: letting go of the
+// service and collecting garbage left it on in a benchmark. On a 4,000-node
+// page it cost tens of megabytes and a slower load, so it is only asked for
+// once an agent reads a page, and the pref turns that off.
+function a11yService() {
+  if (gA11yService === undefined) {
+    try {
+      gA11yService = Cc["@mozilla.org/accessibilityService;1"].getService(
+        Ci.nsIAccessibilityService
+      );
+    } catch {
+      // A build without accessibility.
+      gA11yService = null;
+    }
+  }
+  return gA11yService;
+}
+
+/**
+ * @returns {boolean} Whether this process has the accessibility engine on.
+ */
+export function a11yActive() {
+  return Services.appinfo.accessibilityEnabled;
+}
+
+// The accessibility tree of a document is built after layout, not at once:
+// wait for it, briefly, so the first observation is not the fallback one.
+// The tree of a document is built after layout, and until it is, its
+// controls have no accessibles: wait for the document's to settle, but no
+// longer than a moment, since a page that keeps loading stays busy. Reading
+// goes on without it, controls the tree lacks falling back to the markup.
+async function treeReady(window, service) {
+  const deadline = Date.now() + TREE_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const accessible = service.getAccessibleFor(window.document);
+      if (accessible) {
+        const state = {};
+        accessible.getState(state, {});
+        if (!(state.value & Ci.nsIAccessibleStates.STATE_BUSY)) {
+          return true;
+        }
+      }
+    } catch {
+      return false;
+    }
+    if (Date.now() >= deadline) {
+      return !!service.getAccessibleFor(window.document);
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 20));
+  }
+}
+
+// An accessibility string: null for a control with no name, which is
+// common (icon buttons, bare inputs).
+function a11yText(text, max = 120) {
+  return (text ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+// What the accessibility tree says about an element, or null when it has no
+// accessible (yet): role, name, description and the states that matter to
+// someone acting on it.
+function a11yFacts(service, element) {
+  // Whatever the tree does, the page can still be read from its markup.
+  try {
+    const accessible = service.getAccessibleFor(element);
+    return accessible ? factsOf(accessible) : null;
+  } catch {
+    return null;
+  }
+}
+
+function factsOf(accessible) {
+  const state = {};
+  accessible.getState(state, {});
+  const has = flag => !!(state.value & Ci.nsIAccessibleStates[flag]);
+  const facts = {
+    role: accessible.computedARIARole,
+    name: a11yText(accessible.name),
+    description: a11yText(accessible.description),
+    focused: has("STATE_FOCUSED"),
+    required: has("STATE_REQUIRED"),
+    invalid: has("STATE_INVALID"),
+    readonly: has("STATE_READONLY"),
+  };
+  if (has("STATE_EXPANDED")) {
+    facts.expanded = "true";
+  } else if (has("STATE_COLLAPSED")) {
+    facts.expanded = "false";
+  }
+  if (has("STATE_CHECKABLE")) {
+    facts.checked = has("STATE_MIXED") ? "mixed" : String(has("STATE_CHECKED"));
+  }
+  if (has("STATE_PRESSED")) {
+    facts.pressed = "true";
+  }
+  if (has("STATE_SELECTABLE")) {
+    facts.selected = String(has("STATE_SELECTED"));
+  }
+  return facts;
+}
 
 const KEYS = {
   Enter: { code: "Enter", keyCode: 13 },
@@ -83,10 +223,12 @@ export class LazyvimiumStalePage extends Error {
 }
 
 /**
- * Per document: the ids handed out and what each element looked like when
- * last observed.
+ * Per document: the ids handed out, what each control looked like when last
+ * observed (guards), what it was (kinds, to find its replacement when the
+ * page swaps it out), the regions that were named as outline entries, and a
+ * counter that moves whenever the page does.
  *
- * @type {WeakMap<Document, {ids: WeakMap<Element, number>, nodes: Map<number, WeakRef<Element>>, guards: Map<number, string>}>}
+ * @type {WeakMap<Document, {ids: WeakMap<Element, number>, nodes: Map<number, WeakRef<Element>>, guards: Map<number, string>, kinds: Map<number, {role: string, label: string}>, regions: Set<number>, version: number, watching: boolean}>}
  */
 const gPages = new WeakMap();
 
@@ -99,10 +241,48 @@ let gNextId = 1;
 function pageOf(document) {
   let page = gPages.get(document);
   if (!page) {
-    page = { ids: new WeakMap(), nodes: new Map(), guards: new Map() };
+    page = {
+      ids: new WeakMap(),
+      nodes: new Map(),
+      guards: new Map(),
+      kinds: new Map(),
+      regions: new Set(),
+      version: 0,
+      watching: false,
+    };
     gPages.set(document, page);
   }
   return page;
+}
+
+// Count what changes the page shows, from the first observation on: markup,
+// attributes and text, but also what people do to it that markup does not
+// show, typing and scrolling. page_wait waits on this counter rather than
+// for a fixed time.
+function watch(window, page) {
+  if (page.watching) {
+    return;
+  }
+  page.watching = true;
+  const bump = () => {
+    page.version++;
+  };
+  new window.MutationObserver(bump).observe(window.document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: true,
+  });
+  for (const type of [
+    "input",
+    "change",
+    "scroll",
+    "resize",
+    "focusin",
+    "load",
+  ]) {
+    window.addEventListener(type, bump, { capture: true, passive: true });
+  }
 }
 
 function identity(page, element) {
@@ -267,6 +447,53 @@ function* controls(root) {
   }
 }
 
+// Frames in the document and in every shadow root under it.
+function* iframes(root) {
+  yield* root.querySelectorAll("iframe,frame");
+  for (const element of root.querySelectorAll("*")) {
+    const shadow = element.openOrClosedShadowRoot;
+    if (shadow) {
+      yield* iframes(shadow);
+    }
+  }
+}
+
+// The frames a person can see here, which the agent reads through their own
+// actors: a frame's document may live in another process, so only its
+// browsing context id crosses over. Tracking pixels and hidden frames are
+// left out.
+function visibleFrames(window) {
+  const frames = [];
+  for (const element of iframes(window.document)) {
+    const id = element.browsingContext?.id;
+    const rect = element.getBoundingClientRect();
+    if (
+      !id ||
+      rect.width < MIN_FRAME_SIZE ||
+      rect.height < MIN_FRAME_SIZE ||
+      rect.right <= 0 ||
+      rect.bottom <= 0 ||
+      rect.left >= window.innerWidth ||
+      rect.top >= window.innerHeight ||
+      !visible(element)
+    ) {
+      continue;
+    }
+    frames.push({
+      id,
+      title: (element.title || element.name || "").slice(0, 80),
+      src: (element.src || "").slice(0, 200),
+      rect: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+      },
+    });
+  }
+  return frames;
+}
+
 function inViewport(rect, window) {
   const x = rect.x + rect.width / 2;
   const y = rect.y + rect.height / 2;
@@ -280,10 +507,17 @@ function inViewport(rect, window) {
   );
 }
 
-function visibleText(document, window) {
+// The text in view, or with everywhere set all of the root's, as a scoped
+// reading wants: a form taller than the window is still the one form.
+function visibleText(
+  document,
+  window,
+  root = document.body,
+  everywhere = false
+) {
   const words = [];
   let length = 0;
-  const walker = document.createTreeWalker(document.body, SHOW_TEXT);
+  const walker = document.createTreeWalker(root, SHOW_TEXT);
   const range = document.createRange();
   let node;
   while ((node = walker.nextNode()) && length < MAX_TEXT) {
@@ -302,10 +536,11 @@ function visibleText(document, window) {
     if (
       rect.width > 0 &&
       rect.height > 0 &&
-      rect.bottom > 0 &&
-      rect.top < window.innerHeight &&
-      rect.right > 0 &&
-      rect.left < window.innerWidth
+      (everywhere ||
+        (rect.bottom > 0 &&
+          rect.top < window.innerHeight &&
+          rect.right > 0 &&
+          rect.left < window.innerWidth))
     ) {
       words.push(value);
       length += value.length + 1;
@@ -314,15 +549,107 @@ function visibleText(document, window) {
   return words.join("\n").slice(0, MAX_TEXT);
 }
 
+// Whether the agent is told about an element, and with which role: one it can
+// use and that shows, in view or, for a scoped reading, anywhere in the scope.
+function listable(window, element, everywhere) {
+  const type = (element.getAttribute("type") || "").toLowerCase();
+  if (
+    (element.localName == "input" && UNSAFE_TYPES.has(type)) ||
+    !visible(element) ||
+    disabled(element)
+  ) {
+    return null;
+  }
+  const role = roleOf(element);
+  const rect = element.getBoundingClientRect();
+  const shown = everywhere
+    ? rect.width > 0 && rect.height > 0
+    : inViewport(rect, window);
+  if (!role || !shown) {
+    return null;
+  }
+  if (role == "gridcell" && element.querySelector('button,[role="button"]')) {
+    return null;
+  }
+  return { role, rect };
+}
+
+// One control as the agent reads it: what it is called and says, and the
+// state it is in. The accessibility tree answers where it has an accessible,
+// the markup where it does not.
+function controlItem(window, element, { id, role, rect, facts }) {
+  const item = {
+    id: `e${id}`,
+    role,
+    label: facts?.name || accessibleName(element) || role,
+  };
+  if (facts?.description) {
+    item.description = facts.description;
+  }
+  for (const flag of ["focused", "required", "invalid"]) {
+    if (facts?.[flag]) {
+      item[flag] = true;
+    }
+  }
+  if (isEditable(element, role)) {
+    item.editable = true;
+  }
+  // Said up front, so the agent does not click what a panel covers: in
+  // dev testing it tried YouTube Music's Play under the player three times.
+  const cover = inViewport(rect, window)
+    ? coverOf(window, element, rect)
+    : null;
+  if (cover) {
+    item.covered = describe(cover).slice(0, 80);
+  }
+  const value = fieldValue(element, role);
+  if (value || (value !== null && item.editable)) {
+    item.value = value.slice(0, 200);
+  }
+  for (const key of ["checked", "selected", "expanded"]) {
+    const state = facts?.[key] ?? element.getAttribute(`aria-${key}`);
+    if (state !== null && state !== undefined) {
+      item[key] = state;
+    }
+  }
+  if (facts?.pressed) {
+    item.pressed = facts.pressed;
+  }
+  if (role == "checkbox" || role == "radio") {
+    item.checked ??= String(!!element.checked);
+  }
+  if (element.localName == "select") {
+    item.value = [...element.selectedOptions].map(o => o.label).join(", ");
+    item.options = [...element.options]
+      .filter(o => !o.disabled)
+      .slice(0, MAX_OPTIONS)
+      .map(o => o.label);
+  }
+  return item;
+}
+
 /**
  * Read the page: its address, the controls in view with their ids and the
  * visible text.
  *
  * @param {Window} window
- * @returns {object}
+ * @param {object} [options]
+ * @param {string} [options.scope] An outline entry's id: read only what is
+ *   inside it, all of it rather than what is in view.
+ * @param {boolean} [options.outline] Also list the page's landmarks and
+ *   headings, to pick a scope from.
+ * @param {boolean} [options.a11y] Read names and states from the
+ *   accessibility tree; the pref decides when left out.
+ * @returns {Promise<object>}
  */
-export function observe(window) {
+export async function observe(window, { scope, outline = false, a11y } = {}) {
   const document = window.document;
+  const service =
+    (a11y ?? Services.prefs.getBoolPref(PREF_A11Y, false)) && a11yService();
+  let treeBuilt = false;
+  if (service && document.body) {
+    treeBuilt = await treeReady(window, service);
+  }
   const scroll = {
     y: Math.round(window.scrollY),
     height: document.documentElement?.scrollHeight ?? 0,
@@ -335,88 +662,168 @@ export function observe(window) {
     scroll,
   };
   if (!document.body) {
-    return { ...base, elements: [], text: "", omitted: 0 };
+    return {
+      ...base,
+      elements: [],
+      text: "",
+      omitted: 0,
+      frames: [],
+      version: 0,
+    };
   }
   const page = pageOf(document);
+  watch(window, page);
   for (const [id, ref] of page.nodes) {
     if (!ref.deref()?.isConnected) {
       page.nodes.delete(id);
       page.guards.delete(id);
+      page.kinds.delete(id);
+      page.regions.delete(id);
     }
   }
+  const root = scope ? resolveRegion(window, scope) : document;
   const elements = [];
   let omitted = 0;
   const seen = new Set();
-  for (const element of controls(document)) {
+  for (const element of controls(root)) {
     if (seen.has(element)) {
       continue;
     }
     seen.add(element);
-    const type = (element.getAttribute("type") || "").toLowerCase();
-    if (
-      (element.localName == "input" && UNSAFE_TYPES.has(type)) ||
-      !visible(element) ||
-      disabled(element)
-    ) {
+    const listed = listable(window, element, !!scope);
+    if (!listed) {
       continue;
     }
-    const role = roleOf(element);
-    const rect = element.getBoundingClientRect();
-    if (!role || !inViewport(rect, window)) {
-      continue;
-    }
-    if (role == "gridcell" && element.querySelector('button,[role="button"]')) {
-      continue;
-    }
+    const { role, rect } = listed;
     if (elements.length >= MAX_ELEMENTS) {
       omitted++;
       continue;
     }
     const id = identity(page, element);
     page.guards.set(id, guardOf(element));
-    const item = {
-      id: `e${id}`,
-      role,
-      label: accessibleName(element) || role,
-    };
-    if (isEditable(element, role)) {
-      item.editable = true;
-    }
-    // Said up front, so the agent does not click what a panel covers: in
-    // dev testing it tried YouTube Music's Play under the player three times.
-    const cover = coverOf(window, element, rect);
-    if (cover) {
-      item.covered = describe(cover).slice(0, 80);
-    }
-    const value = fieldValue(element, role);
-    if (value || (value !== null && item.editable)) {
-      item.value = value.slice(0, 200);
-    }
-    for (const key of ["checked", "selected", "expanded"]) {
-      const state = element.getAttribute(`aria-${key}`);
-      if (state !== null) {
-        item[key] = state;
-      }
-    }
-    if (role == "checkbox" || role == "radio") {
-      item.checked ??= String(!!element.checked);
-    }
-    if (element.localName == "select") {
-      item.value = [...element.selectedOptions].map(o => o.label).join(", ");
-      item.options = [...element.options]
-        .filter(o => !o.disabled)
-        .slice(0, MAX_OPTIONS)
-        .map(o => o.label);
-    }
-    elements.push(item);
+    page.kinds.set(id, { role, label: accessibleName(element) });
+    const facts = service && treeBuilt ? a11yFacts(service, element) : null;
+    elements.push(controlItem(window, element, { id, role, rect, facts }));
   }
   return {
     ...base,
     elements,
     omitted,
-    text: visibleText(document, window),
+    frames: scope ? [] : visibleFrames(window),
+    text: scope
+      ? visibleText(document, window, root, true)
+      : visibleText(document, window),
     selection: window.getSelection()?.toString().slice(0, 2000) ?? "",
+    version: page.version,
+    ...(scope && { scope }),
+    ...(outline && { outline: outlineOf(window, page, service && treeBuilt) }),
   };
+}
+
+// The headings and landmarks of the whole page, each with an id to scope a
+// reading to, so the agent can ask for the payment form rather than a page
+// of navigation. The ids are for scoping only; none of them can be clicked.
+function outlineOf(window, page, service) {
+  const entries = [];
+  const seen = new Set();
+  const visit = root => {
+    for (const element of root.querySelectorAll(OUTLINE_SELECTOR)) {
+      if (seen.has(element) || !visible(element)) {
+        continue;
+      }
+      seen.add(element);
+      const explicit = element.getAttribute("role");
+      const heading =
+        /^h[1-6]$/.test(element.localName) || explicit == "heading";
+      let kind = heading ? "heading" : IMPLICIT_LANDMARKS[element.localName];
+      if (LANDMARK_ROLES.has(explicit)) {
+        kind = explicit;
+      }
+      if (!kind) {
+        continue;
+      }
+      const label =
+        (service && a11yFacts(service, element)?.name) ||
+        accessibleName(element) ||
+        (heading
+          ? element.textContent.replace(/\s+/g, " ").trim().slice(0, 80)
+          : "");
+      // A form or region with no name says nothing a scope would not.
+      if (!heading && !label && (kind == "form" || kind == "region")) {
+        continue;
+      }
+      const id = identity(page, element);
+      page.regions.add(id);
+      const level = heading
+        ? Number(element.getAttribute("aria-level") || element.localName[1]) ||
+          2
+        : undefined;
+      const rect = element.getBoundingClientRect();
+      entries.push({
+        id: `e${id}`,
+        role: kind,
+        label: label.slice(0, 80),
+        ...(level && { level }),
+        inView:
+          rect.bottom > 0 &&
+          rect.top < window.innerHeight &&
+          rect.right > 0 &&
+          rect.left < window.innerWidth,
+      });
+    }
+    for (const element of root.querySelectorAll("*")) {
+      const shadow = element.openOrClosedShadowRoot;
+      if (shadow) {
+        visit(shadow);
+      }
+    }
+  };
+  visit(window.document);
+  return entries.slice(0, MAX_OUTLINE);
+}
+
+// A region an outline listed, as a scope: present and showing, but without
+// the check controls get, since a dialog's text changes as it is used.
+function resolveRegion(window, elementId) {
+  const match = /^e(\d+)$/.exec(String(elementId ?? ""));
+  const id = match && Number(match[1]);
+  const page = pageOf(window.document);
+  const element = id && page.nodes.get(id)?.deref();
+  if (!element?.isConnected || !page.regions.has(id)) {
+    throw new LazyvimiumStalePage(
+      `${elementId} is not a region from the page's outline, or it is gone. Observe with the outline again.`
+    );
+  }
+  return element;
+}
+
+// The one control now showing with the role and name a lost id had, if there
+// is exactly one: frameworks replace nodes they re-render, and what the
+// agent meant is usually still there. It is offered, never used on the
+// agent's behalf: an equal-looking control can be a different one.
+function replacementOf(window, page, id) {
+  const kind = page.kinds.get(id);
+  if (!kind?.label) {
+    return null;
+  }
+  const matches = [];
+  for (const element of controls(window.document)) {
+    if (
+      roleOf(element) == kind.role &&
+      accessibleName(element) == kind.label &&
+      visible(element) &&
+      !disabled(element)
+    ) {
+      matches.push(element);
+    }
+  }
+  if (matches.length != 1) {
+    return null;
+  }
+  const found = identity(page, matches[0]);
+  page.guards.set(found, guardOf(matches[0]));
+  page.kinds.set(found, kind);
+  return `e${found}`;
 }
 
 function resolveElement(window, elementId) {
@@ -429,9 +836,17 @@ function resolveElement(window, elementId) {
   const id = Number(match[1]);
   const page = pageOf(window.document);
   const element = page.nodes.get(id)?.deref();
-  if (!element?.isConnected || !page.guards.has(id)) {
+  if (page.regions.has(id) && !page.guards.has(id)) {
     throw new LazyvimiumStalePage(
-      `${elementId} is no longer on the page. Observe again.`
+      `${elementId} is a region of the outline, not a control. Use it as scope, or pick a control from an observation of it.`
+    );
+  }
+  if (!element?.isConnected || !page.guards.has(id)) {
+    const successor = replacementOf(window, page, id);
+    throw new LazyvimiumStalePage(
+      successor
+        ? `${elementId} was replaced by the page; ${successor} has the same role and name. Observe again to check, then use it.`
+        : `${elementId} is no longer on the page. Observe again.`
     );
   }
   if (guardOf(element) != page.guards.get(id)) {
@@ -724,7 +1139,31 @@ export async function act(window, { action, element: elementId, text }) {
 }
 
 export const actions = {
-  "agent.observe": ({ window }) => observe(window),
+  "agent.observe": async ({ window }, args) => {
+    try {
+      return await observe(window, args);
+    } catch (e) {
+      if (e instanceof LazyvimiumStalePage) {
+        return { error: e.message };
+      }
+      throw e;
+    }
+  },
+  // Cheap to ask, for page_wait: where the page's change counter stands, and
+  // which frames to ask next.
+  "agent.version": ({ window }) => {
+    const document = window.document;
+    // Counting starts here if no observation did it, so a wait after a
+    // navigation sees the new page's changes.
+    if (document.body) {
+      watch(window, pageOf(document));
+    }
+    return {
+      version: document.body ? pageOf(document).version : 0,
+      loading: document.readyState == "loading",
+      frames: document.body ? visibleFrames(window).map(frame => frame.id) : [],
+    };
+  },
   "agent.act": async ({ window }, args) => {
     try {
       return { ok: true, done: await act(window, args) };

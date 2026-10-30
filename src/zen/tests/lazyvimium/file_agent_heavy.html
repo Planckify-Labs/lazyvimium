@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Heavy shop</title>
+  <style>
+    body { margin: 0; font: 14px sans-serif; }
+    nav a, footer a { margin-right: 8px; }
+    .grid { display: flex; flex-wrap: wrap; }
+    .card { width: 220px; margin: 6px; padding: 6px; border: 1px solid #ccc; }
+    aside { float: left; width: 200px; }
+    main { margin-left: 210px; }
+  </style>
+</head>
+<body>
+  <header><h1>Heavy shop</h1></header>
+  <nav aria-label="Main" id="nav"></nav>
+  <aside><form aria-label="Filters" id="filters"></form></aside>
+  <main>
+    <h2>Products</h2>
+    <div class="grid" id="grid"></div>
+  </main>
+  <footer id="footer"></footer>
+  <script>
+    // About 700 cards and 450 links and filters: a few thousand nodes, most
+    // of them far below the window, as in a store's listing page.
+    const el = (tag, props = {}, ...kids) => {
+      const node = Object.assign(document.createElement(tag), props);
+      node.append(...kids);
+      return node;
+    };
+    const nav = document.getElementById("nav");
+    for (let i = 0; i < 120; i++) {
+      nav.append(el("a", { href: "#c" + i, textContent: "Category " + i }));
+    }
+    const filters = document.getElementById("filters");
+    for (let i = 0; i < 80; i++) {
+      filters.append(
+        el("label", {}, el("input", { type: "checkbox" }), " Brand " + i),
+        el("br")
+      );
+    }
+    const grid = document.getElementById("grid");
+    for (let i = 0; i < 700; i++) {
+      grid.append(
+        el(
+          "div",
+          { className: "card" },
+          el("h3", { textContent: "Product " + i }),
+          el("p", { textContent: "$" + (10 + (i % 90)) + ".99 — free shipping" }),
+          el("button", { type: "button", textContent: "Add to cart" }),
+          el("a", { href: "#p" + i, textContent: "Details" })
+        )
+      );
+    }
+    const footer = document.getElementById("footer");
+    for (let i = 0; i < 150; i++) {
+      footer.append(el("a", { href: "#f" + i, textContent: "Legal " + i }));
+    }
+  </script>
+</body>
+</html>

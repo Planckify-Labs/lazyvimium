@@ -56,6 +56,13 @@ export const LazyvimiumAgentSpec = {
       desc: "Read the Page for the Agent",
       where: "content",
       module: CONTENT,
+      params: { scope: "string?", outline: "boolean?", a11y: "boolean?" },
+      agent: false,
+    },
+    "agent.version": {
+      desc: "Ask How Much the Page Has Changed",
+      where: "content",
+      module: CONTENT,
       agent: false,
     },
     "agent.act": {

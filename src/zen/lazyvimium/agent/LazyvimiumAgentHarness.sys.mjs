@@ -41,6 +41,8 @@ done`;
 const OWN_TOOLS = [
   "page_observe",
   "page_act",
+  "page_screenshot",
+  "page_wait",
   "page_navigate",
   "tabs_list",
   "tab_open",
@@ -57,8 +59,12 @@ const QUIET_TOOLS = new Set(["ToolSearch", "call_mcp_tool"]);
 const STDERR_TAIL = 4000;
 
 export const BROWSER_INSTRUCTIONS = `You are working in the user's web browser, lazyvimium, starting on the tab they asked from. Use the "${MCP_SERVER_NAME}" tools to do what they ask:
-- page_observe reads a tab: its address, the visible text and the controls you can use, each with an id like e12.
+- page_observe reads a tab: its address, the visible text and the controls you can use, each with an id like e12. Frames on the page are read too, their controls with ids like f7.e3.
 - page_act clicks, fills, selects, presses a key or scrolls, using an id from the tab's latest observation, and returns the page after the action.
+- page_observe with outline true lists the page's landmarks and headings; with scope set to one of their ids it reads only that part, which saves a lot on big pages.
+- page_wait waits for the page to change, for content that loads or opens after an action; do not guess delays.
+- page_screenshot returns a picture of the tab, if you can see images.
+- A CAPTCHA is a check made for the user: do not try to solve it. Say what is on the page and ask the user to complete it, then observe again.
 - page_navigate opens an address; browser_action runs a browser command (history, reader mode and more).
 - tabs_list shows the open tabs, each with an id like t3. tab_open opens a new tab, tab_switch moves you to another tab, tab_close closes one. The page tools work on the tab you are on, or on the one you name with tab.
 Prefer opening a tab of your own over leaving the user's page when a task needs another site, and close the tabs you opened once they are no longer needed. Observe before you act. Ids stay valid only while the element is unchanged; if a call says the page changed, observe again. Do not use shell, file or code tools for the task. Never enter passwords or payment details: ask the user to do that. When you are done, answer in a few sentences.`;

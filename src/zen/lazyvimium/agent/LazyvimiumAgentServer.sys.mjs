@@ -32,7 +32,7 @@ const MAX_BODY = 1024 * 1024;
 /**
  * @typedef {object} LazyvimiumMcpSession What one token may do.
  * @property {() => object[]} listTools MCP tool descriptions.
- * @property {(name: string, args: object) => Promise<{text: string, isError?: boolean}>} callTool
+ * @property {(name: string, args: object) => Promise<{text: string, image?: {data: string, mimeType: string}, isError?: boolean}>} callTool
  *   Runs a tool; a thrown error becomes a tool error the agent reads.
  */
 
@@ -99,11 +99,20 @@ export async function handleMcpMessage(session, message) {
         return fail(-32602, "tools/call needs a name");
       }
       try {
-        const { text, isError = false } = await session.callTool(
-          params.name,
-          params.arguments ?? {}
-        );
-        return reply({ content: [{ type: "text", text }], isError });
+        const {
+          text,
+          image,
+          isError = false,
+        } = await session.callTool(params.name, params.arguments ?? {});
+        return reply({
+          content: [
+            { type: "text", text },
+            ...(image
+              ? [{ type: "image", data: image.data, mimeType: image.mimeType }]
+              : []),
+          ],
+          isError,
+        });
       } catch (e) {
         if (e instanceof LazyvimiumMcpError) {
           return fail(e.code, e.message);

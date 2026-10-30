@@ -844,3 +844,331 @@ add_task(async function test_navigate_to_another_site_returns_it() {
   ok(result.text.includes("URL: https://example.org/"), "on the new site");
   BrowserTestUtils.removeTab(tab);
 });
+
+// From dev testing on a reCAPTCHA page: a frame of another site, in another
+// process, was an empty box to the agent, which scrolled looking for it.
+add_task(async function test_frames_of_other_sites_are_read_and_driven() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    ROOT + "file_agent_frame_host.html"
+  );
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const frame = browser.browsingContext.children.find(
+    child => child.currentURI?.host == "example.org"
+  );
+  ok(frame, "the card form is a frame of another site");
+  Assert.notEqual(
+    frame.currentWindowGlobal.domProcess.childID,
+    browser.browsingContext.currentWindowGlobal.domProcess.childID,
+    "in another process"
+  );
+
+  const { text } = await box.callTool("page_observe", {});
+  ok(text.includes(`Frame f${frame.id} "Card form" at `), text);
+  ok(!text.includes("(could not be read)"), "nothing is left unread");
+  ok(text.includes("Card frame") || text.includes("idle"), "its text");
+  const pay = text.match(
+    new RegExp(`\\[(f${frame.id}\\.e\\d+)\\] button "Pay now"`)
+  );
+  ok(pay, "its button has an id of its own");
+  const card = text.match(
+    new RegExp(`\\[(f${frame.id}\\.e\\d+)\\] textbox "Card number"`)
+  );
+  ok(card, "so does its field");
+  ok(!/Frame f\d+ .*about:blank/.test(text), "a 1px frame is left out");
+
+  let result = await box.callTool("page_act", {
+    action: "fill",
+    element: card[1],
+    text: "4242",
+  });
+  ok(!result.isError, result.text);
+  Assert.equal(
+    await SpecialPowers.spawn(
+      frame,
+      [],
+      () => content.document.getElementById("card").value
+    ),
+    "4242",
+    "text goes into the frame"
+  );
+  result = await box.callTool("page_act", { action: "click", element: pay[1] });
+  ok(!result.isError, result.text);
+  Assert.equal(
+    await SpecialPowers.spawn(
+      frame,
+      [],
+      () => content.document.getElementById("out").textContent
+    ),
+    "paid",
+    "a trusted click lands in the frame"
+  );
+
+  result = await box.callTool("page_act", {
+    action: "click",
+    element: "f99999.e1",
+  });
+  ok(
+    result.isError && result.text.includes("no longer on the page"),
+    "a frame that is gone is stale"
+  );
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_screenshot_returns_a_jpeg_of_the_tab() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    ROOT + "file_agent_frame_host.html"
+  );
+  const { box } = toolbox(tab);
+  const result = await box.callTool("page_screenshot", {});
+  ok(!result.isError, result.text);
+  Assert.equal(result.image.mimeType, "image/jpeg");
+  const bytes = atob(result.image.data);
+  Assert.equal(bytes.slice(0, 3), "\xff\xd8\xff", "a JPEG");
+  Assert.greater(bytes.length, 1000, "with something in it");
+  ok(/^Screenshot of t\d+, \d+x\d+px/.test(result.text), result.text);
+  BrowserTestUtils.removeTab(tab);
+});
+
+const RICH = `<!doctype html><title>Rich page</title>
+<body style="margin: 20px">
+  <header><h1>Shop</h1></header>
+  <nav aria-label="Main"><a href="#a">Home</a><a href="#b">Orders</a></nav>
+  <main>
+    <h2>Sign up</h2>
+    <form id="signup" aria-label="Sign up" onsubmit="event.preventDefault()">
+      <input id="email" type="email" aria-label="Email" required aria-invalid="true"
+             aria-describedby="hint">
+      <p id="hint">We never share it</p>
+      <button id="mute" type="button" aria-pressed="true">Mute</button>
+      <details><summary>More options</summary><p>Hidden detail</p></details>
+    </form>
+    <div id="list"></div>
+    <button id="load" type="button">Load more</button>
+    <button id="swap" type="button">Swap</button>
+    <div id="slot"><button id="buy" type="button">Buy now</button></div>
+    <div style="height: 3000px">tall</div>
+    <h2>Far below</h2>
+    <button id="bottom" type="button">At the bottom</button>
+  </main>
+  <footer>Legal</footer>
+  <script>
+    document.getElementById("load").addEventListener("click", () => {
+      setTimeout(() => {
+        const b = document.createElement("button");
+        b.textContent = "Loaded item";
+        document.getElementById("list").append(b);
+      }, 300);
+    });
+    document.getElementById("swap").addEventListener("click", () => {
+      const slot = document.getElementById("slot");
+      slot.innerHTML = '<button id="buy2" type="button">Buy now</button>';
+    });
+  </script>
+</body>`;
+
+async function openRich() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "data:text/html," + encodeURIComponent(RICH)
+  );
+  registerCleanupFunction(() => {
+    if (gBrowser.tabs.includes(tab)) {
+      BrowserTestUtils.removeTab(tab);
+    }
+  });
+  return tab;
+}
+
+// What only the accessibility tree knows: the description a field points at,
+// that it is required and invalid, and that a toggle is pressed.
+add_task(async function test_the_accessibility_tree_names_and_states() {
+  const tab = await openRich();
+  const { box } = toolbox(tab);
+  // Off by default: the markup alone, as before.
+  let { text } = await box.callTool("page_observe", {});
+  ok(!text.includes("description="), "the markup alone gives no description");
+  ok(!text.includes(" required"), "or required");
+  ok(text.includes('textbox "Email"'), "but still the controls");
+
+  await SpecialPowers.pushPrefEnv({ set: [["lazyvimium.agent.a11y", true]] });
+  ({ text } = await box.callTool("page_observe", {}));
+  ok(
+    /\[e\d+\] textbox "Email" description="We never share it" .*required invalid/.test(
+      text
+    ),
+    text
+  );
+  ok(/button "Mute" pressed=true/.test(text), "the toggle is pressed");
+  ok(/button "More options" expanded=false/.test(text), "a closed details");
+  await SpecialPowers.popPrefEnv();
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_outline_and_scope_read_a_part_of_the_page() {
+  const tab = await openRich();
+  const { box } = toolbox(tab);
+  const full = await box.callTool("page_observe", {});
+  const { text } = await box.callTool("page_observe", { outline: true });
+  ok(text.includes("Outline (use an id as scope"), text);
+  ok(/\[e\d+\] heading 1 "Shop"/.test(text), "the top heading");
+  ok(/\[e\d+\] navigation "Main"/.test(text), "a landmark");
+  ok(/\[e\d+\] main\b/.test(text), "the main region");
+  ok(/heading 2 "Far below" \(out of view\)/.test(text), "what is off screen");
+  const form = text.match(/\[(e\d+)\] form "Sign up"/);
+  ok(form, "a named form");
+
+  const scoped = await box.callTool("page_observe", { scope: form[1] });
+  ok(!scoped.isError, scoped.text);
+  ok(scoped.text.includes(`Elements in ${form[1]}:`), scoped.text);
+  ok(scoped.text.includes('textbox "Email"'), "its field");
+  ok(scoped.text.includes('button "More options"'), "its details");
+  ok(!scoped.text.includes('"Home"'), "not the navigation");
+  // The data: URL on the URL line holds the whole page; read below it.
+  ok(
+    !scoped.text.split("Visible text:")[1].includes("Legal"),
+    "not the footer"
+  );
+  Assert.less(scoped.text.length, full.text.length, "so it is shorter");
+
+  const below = text.match(/\[(e\d+)\] main/);
+  const wide = await box.callTool("page_observe", { scope: below[1] });
+  ok(
+    wide.text.includes('button "At the bottom"'),
+    "a scope reads past the window, to the bottom of the region"
+  );
+
+  const control = scoped.text.match(/\[(e\d+)\] button "Mute"/);
+  const refused = await box.callTool("page_act", {
+    action: "click",
+    element: form[1],
+  });
+  ok(
+    refused.isError && refused.text.includes("is a region of the outline"),
+    refused.text
+  );
+  ok(control, "controls of the scope can be acted on");
+  const bad = await box
+    .callTool("page_observe", { scope: "e99999" })
+    .catch(e => ({ isError: true, text: e.message }));
+  ok(bad.isError && bad.text.includes("not a region"), bad.text);
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_wait_returns_when_the_page_changes() {
+  const tab = await openRich();
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  await box.callTool("page_act", {
+    action: "click",
+    element: idOf(text, 'button "Load more"'),
+  });
+  const started = Date.now();
+  const waited = await box.callTool("page_wait", { timeout_ms: 5000 });
+  ok(!waited.isError, waited.text);
+  ok(waited.text.startsWith("The page changed."), waited.text.slice(0, 80));
+  ok(waited.text.includes('button "Loaded item"'), "it returns the new page");
+  Assert.less(Date.now() - started, 3000, "long before the timeout");
+
+  const quiet = await box.callTool("page_wait", { timeout_ms: 400 });
+  ok(
+    quiet.text.startsWith("The page did not change in 400 ms."),
+    quiet.text.slice(0, 80)
+  );
+  BrowserTestUtils.removeTab(tab);
+});
+
+// A framework re-renders a control as a new node: the old id is refused, and
+// the answer names the one that took its place instead of leaving the agent
+// to guess, or reusing the dead id.
+add_task(async function test_a_replaced_control_is_offered_not_reused() {
+  const tab = await openRich();
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  const buy = idOf(text, 'button "Buy now"');
+  await SpecialPowers.spawn(browser, [], () => {
+    content.document.getElementById("slot").innerHTML =
+      '<button id="buy2" type="button">Buy now</button>';
+  });
+  const result = await box.callTool("page_act", {
+    action: "click",
+    element: buy,
+  });
+  ok(result.isError, "the old id is not used");
+  const hint = result.text.match(
+    /was replaced by the page; (e\d+) has the same role and name/
+  );
+  ok(hint, result.text);
+  ok(
+    new RegExp(`\\[${hint[1]}\\] button "Buy now"`).test(result.text),
+    "and the new observation lists it"
+  );
+  const again = await box.callTool("page_act", {
+    action: "click",
+    element: hint[1],
+  });
+  ok(!again.isError, again.text);
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_outline_and_scope_reach_into_frames() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    ROOT + "file_agent_frame_host.html"
+  );
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", { outline: true });
+  const form = text.match(/\[(f\d+\.e\d+)\] form "Card details"/);
+  ok(form, "the frame's form is in the outline: " + text);
+  const scoped = await box.callTool("page_observe", { scope: form[1] });
+  ok(!scoped.isError, scoped.text);
+  const prefix = form[1].split(".")[0];
+  ok(
+    new RegExp(`\\[${prefix}\\.e\\d+\\] button "Pay now"`).test(scoped.text),
+    "its controls keep the frame in their ids: " + scoped.text
+  );
+  ok(!scoped.text.includes("Checkout"), "and nothing of the host page");
+  BrowserTestUtils.removeTab(tab);
+});
+
+// From dev testing on a sign-up form: a control with no accessible name makes
+// the accessibility tree answer null for it, and every observation threw
+// until the loop gave up after 15 seconds.
+add_task(async function test_controls_without_names_do_not_break_observing() {
+  const page = `<!doctype html><title>Form</title>
+    <body style="margin: 20px">
+      <form onsubmit="event.preventDefault()">
+        <input id="plain">
+        <input id="named" placeholder="Username">
+        <select id="proto"><option>VMess</option><option>VLESS</option></select>
+        <div role="button" tabindex="0" id="icon"></div>
+        <button id="blank"></button>
+        <input type="checkbox" id="agree">
+        <input type="submit" id="send" value="">
+      </form>
+    </body>`;
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "data:text/html," + encodeURIComponent(page)
+  );
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const started = Date.now();
+  const { text } = await box.callTool("page_observe", {});
+  Assert.less(Date.now() - started, 3000, "no retrying until the timeout");
+  ok(/\[e\d+\] textbox "Username"/.test(text), text);
+  ok(/\[e\d+\] checkbox/.test(text), "nameless controls are still listed");
+
+  const named = idOf(text, 'textbox "Username"');
+  const result = await box.callTool("page_act", {
+    action: "fill",
+    element: named,
+    text: "ada",
+  });
+  ok(!result.isError, result.text);
+  Assert.equal(await content(browser, "#named", "value"), "ada");
+  BrowserTestUtils.removeTab(tab);
+});

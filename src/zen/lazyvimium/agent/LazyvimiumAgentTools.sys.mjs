@@ -19,6 +19,43 @@ const LOAD_TIMEOUT_MS = 15000;
 const RETRY_MS = 100;
 // How long a click takes to start the navigation it causes, if it does.
 const NAVIGATION_START_MS = 250;
+// Frames read per observation, and how deep: ads and trackers can nest
+// dozens, and each one costs a round trip to its process.
+const MAX_FRAMES = 12;
+const MAX_FRAME_DEPTH = 3;
+const FRAME_TIMEOUT_MS = 1500;
+const QUERY_TIMEOUT_MS = 5000;
+// Wide enough to read a page, narrow enough to be cheap as image input.
+const WAIT_DEFAULT_MS = 5000;
+const WAIT_MAX_MS = 15000;
+const WAIT_POLL_MS = 100;
+const WAIT_SETTLE_MAX_MS = 2000;
+const SCREENSHOT_MAX_WIDTH = 1280;
+const SCREENSHOT_QUALITY = 0.8;
+
+// An element id is e12 in the tab's own document and f7.e12 in the frame
+// whose browsing context has id 7.
+// A page that navigates can drop a query without ever answering it: in dev
+// testing, the call after a click on a link hung until the test gave up.
+function withTimeout(promise, ms = QUERY_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((resolve, reject) =>
+      lazy.setTimeout(
+        () => reject(new Error("The page did not answer in time")),
+        ms
+      )
+    ),
+  ]);
+}
+
+// The page answered, and said the scope asked for is not one it has.
+class ScopeRefused extends Error {}
+
+function parseElementId(id) {
+  const match = /^f(\d+)\.(e\d+)$/.exec(String(id ?? ""));
+  return match ? { frame: Number(match[1]), local: match[2] } : null;
+}
 
 function sleep(ms) {
   return new Promise(resolve => lazy.setTimeout(resolve, ms));
@@ -65,6 +102,7 @@ function isUnloaded(tab) {
  * @returns {string}
  */
 export function formatObservation(page, tab) {
+  const prefix = page.prefix ?? "";
   const lines = [
     ...(tab ? [`Tab: ${tab}`] : []),
     `Title: ${page.title || "(none)"}`,
@@ -77,18 +115,102 @@ export function formatObservation(page, tab) {
   if (page.selection) {
     lines.push(`Selected text: ${quote(page.selection)}`);
   }
-  lines.push("", "Elements in view:");
+  lines.push("", ...elementLines(page, prefix), ...frameLines(page));
+  return lines.join("\n");
+}
+
+// CAPTCHAs are checks for a person, so the agent is told to hand them over
+// rather than shown their pieces to click. In dev testing it scrolled a page
+// up and down for minutes looking for the one inside an iframe.
+const CAPTCHAS = [
+  [/google\.com\/recaptcha\/|recaptcha\.net\//, "reCAPTCHA"],
+  [/hcaptcha\.com\//, "hCaptcha"],
+  [/challenges\.cloudflare\.com\//, "Cloudflare Turnstile"],
+  [/arkoselabs\.com\/|funcaptcha\.com\//, "Arkose"],
+  [/geetest\.com\//, "GeeTest"],
+];
+
+function captchaOf(url) {
+  return CAPTCHAS.find(([pattern]) => pattern.test(url))?.[1] ?? null;
+}
+
+// Frame ids are flat, nested ones included: a browsing context id is unique
+// in the browser, and names the frame without its parents.
+function frameLines(page) {
+  const lines = [];
+  for (const frame of page.frames ?? []) {
+    const id = `f${frame.id}`;
+    const url = frame.page?.url || frame.src || "";
+    const where = `at ${frame.rect.x},${frame.rect.y} ${frame.rect.w}x${frame.rect.h}`;
+    const name = frame.title || frame.page?.title;
+    lines.push(
+      "",
+      `Frame ${id}${name ? ` ${quote(name)}` : ""} ${where}${url ? `: ${url}` : ""}`
+    );
+    const captcha = captchaOf(url);
+    if (captcha) {
+      lines.push(
+        `This is a ${captcha} challenge, a check made for the user. Do not click in it or try to solve it. Tell the user to complete it, then observe again.`
+      );
+    } else if (frame.skipped) {
+      lines.push("(not read: too many frames)");
+    } else if (!frame.page) {
+      lines.push("(could not be read)");
+    } else {
+      lines.push(
+        ...elementLines(frame.page, `f${frame.id}.`),
+        ...frameLines(frame.page)
+      );
+    }
+  }
+  return lines;
+}
+
+// The page's landmarks and headings, indented by heading level, so the agent
+// can see what is off screen and read one part of it.
+function outlineLines(page, prefix = "") {
+  if (!page.outline) {
+    return [];
+  }
+  const lines = ["Outline (use an id as scope to read only that part):"];
+  if (!page.outline.length) {
+    lines.push("(none)");
+  }
+  for (const entry of page.outline) {
+    const indent = entry.level ? "  ".repeat(entry.level - 1) : "";
+    const name = entry.label ? ` ${quote(entry.label)}` : "";
+    const level = entry.level ? ` ${entry.level}` : "";
+    lines.push(
+      `${indent}[${prefix}${entry.id}] ${entry.role}${level}${name}${entry.inView ? "" : " (out of view)"}`
+    );
+  }
+  return [...lines, ""];
+}
+
+function elementLines(page, prefix = "") {
+  const lines = [
+    ...outlineLines(page, prefix),
+    page.scope ? `Elements in ${prefix}${page.scope}:` : "Elements in view:",
+  ];
   if (!page.elements.length) {
     lines.push("(none)");
   }
   for (const element of page.elements) {
-    let line = `[${element.id}] ${element.role} ${quote(element.label)}`;
+    let line = `[${prefix}${element.id}] ${element.role} ${quote(element.label)}`;
+    if (element.description) {
+      line += ` description=${quote(element.description)}`;
+    }
     if (element.value !== undefined) {
       line += ` value=${quote(element.value)}`;
     }
-    for (const key of ["checked", "selected", "expanded"]) {
+    for (const key of ["checked", "selected", "expanded", "pressed"]) {
       if (element[key] !== undefined) {
         line += ` ${key}=${element[key]}`;
+      }
+    }
+    for (const flag of ["focused", "required", "invalid"]) {
+      if (element[flag]) {
+        line += ` ${flag}`;
       }
     }
     if (element.editable) {
@@ -106,7 +228,7 @@ export function formatObservation(page, tab) {
     lines.push(`(${page.omitted} more not listed; scroll or act to see them)`);
   }
   lines.push("", "Visible text:", page.text || "(none)");
-  return lines.join("\n");
+  return lines;
 }
 
 /**
@@ -126,7 +248,46 @@ export function toolDefinitions(registry) {
     {
       name: "page_observe",
       description:
-        "Read a tab: its title and URL, every control in view with an id like e12, and the visible text.",
+        "Read a tab: its title and URL, every control in view with an id like e12, and the visible text. Frames on the page (embedded forms, logins, players) are read too, their ids like f7.e3. A CAPTCHA is not for you to solve: ask the user to complete it. On a large page, read it in parts: outline true adds the page's landmarks and headings, each with an id, and scope with one of those ids reads only what is inside it, all of it rather than what is in view.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tab,
+          outline: {
+            type: "boolean",
+            description: "Also list the page's landmarks and headings",
+          },
+          scope: {
+            type: "string",
+            description:
+              "An id from the outline: read only the controls and text inside it",
+          },
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "page_wait",
+      description:
+        "Wait for the page to change, then return it. Use after something that loads or opens content (a click that starts a request, a menu, a dialog) instead of guessing a delay. Returns early when the page changes, or says it did not change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          timeout_ms: {
+            type: "number",
+            description: `How long to wait at most, up to ${WAIT_MAX_MS}; ${WAIT_DEFAULT_MS} if left out`,
+          },
+          tab,
+        },
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "page_screenshot",
+      description:
+        "A picture of what the tab shows now, canvases and frames included. Only useful if you can see images; page_observe is the text of the same view.",
       inputSchema: {
         type: "object",
         properties: { tab },
@@ -145,7 +306,10 @@ export function toolDefinitions(registry) {
             type: "string",
             enum: ["click", "fill", "select", "press", "scroll"],
           },
-          element: { type: "string", description: "An id such as e12" },
+          element: {
+            type: "string",
+            description: "An id such as e12, or f7.e3 inside a frame",
+          },
           text: {
             type: "string",
             description:
@@ -333,8 +497,14 @@ export class LazyvimiumAgentToolbox {
       case "page_observe":
         return this.#onTab(args.tab, "Read the page", async browser => ({
           title: args.tab ? `Read ${args.tab}` : "Read the page",
-          text: await this.#observeText(browser),
+          text: await this.#observeText(browser, args),
         }));
+      case "page_wait":
+        return this.#wait(args);
+      case "page_screenshot":
+        return this.#onTab(args.tab, "Took a screenshot", browser =>
+          this.#screenshot(browser)
+        );
       case "page_act":
         return this.#act(args);
       case "page_navigate":
@@ -575,7 +745,11 @@ export class LazyvimiumAgentToolbox {
       step.title = result.title ?? title;
       this.#lastTitle = step.title;
       this.onStep(step);
-      return { text: result.text, isError: !!result.isError };
+      return {
+        text: result.text,
+        isError: !!result.isError,
+        ...(result.image && { image: result.image }),
+      };
     } catch (e) {
       step.status = "failed";
       step.detail = String(e.message ?? e);
@@ -585,22 +759,132 @@ export class LazyvimiumAgentToolbox {
   }
 
   #runContent(browser, id, args = {}) {
-    return this.lazyvimium.run(id, args, { browser });
+    return withTimeout(this.lazyvimium.run(id, args, { browser }));
+  }
+
+  // A query to a frame's actor.
+  #queryFrame(actor, id, args = {}) {
+    return withTimeout(actor.sendQuery("Lazyvimium:RunContent", { id, args }));
+  }
+
+  // The actor of a frame of the tab, if it is still there. Its document may
+  // be in another process; the actor is how to reach it.
+  #frameActor(browser, frame) {
+    const context = BrowsingContext.get(frame);
+    if (context?.top.id != browser.browsingContext.id) {
+      return null;
+    }
+    return context.currentWindowGlobal?.getActor("LazyvimiumKeys") ?? null;
+  }
+
+  // Read a frame, waiting out its load as the tab is.
+  async #observeFrame(browser, frame, args = {}) {
+    const deadline = Date.now() + FRAME_TIMEOUT_MS;
+    let page = null;
+    while (Date.now() < deadline) {
+      try {
+        const actor = this.#frameActor(browser, frame);
+        page = actor && (await this.#queryFrame(actor, "agent.observe", args));
+        if (page && !page.loading) {
+          return page;
+        }
+      } catch {
+        // The frame is navigating, or has no actor yet.
+      }
+      await sleep(RETRY_MS);
+    }
+    return page;
+  }
+
+  // Put what each visible frame shows under it, in the frames' own order,
+  // CAPTCHAs aside, which are not for the agent to read.
+  async #readFrames(
+    browser,
+    page,
+    args = {},
+    budget = { left: MAX_FRAMES },
+    depth = 0
+  ) {
+    const frames = page.frames ?? [];
+    for (const frame of frames) {
+      if (captchaOf(frame.src)) {
+        continue;
+      }
+      frame.skipped = budget.left <= 0 || depth >= MAX_FRAME_DEPTH;
+      if (!frame.skipped) {
+        budget.left--;
+      }
+    }
+    await Promise.all(
+      frames
+        .filter(frame => !frame.skipped && !captchaOf(frame.src))
+        .map(async frame => {
+          frame.page = await this.#observeFrame(browser, frame.id, args);
+          if (frame.page) {
+            await this.#readFrames(
+              browser,
+              frame.page,
+              args,
+              budget,
+              depth + 1
+            );
+          }
+        })
+    );
   }
 
   // Observe, waiting out a navigation: the page's actor is gone while the
   // next document loads.
-  async #observe(browser) {
+  async #observe(browser, { scope, outline } = {}) {
+    const args = { ...(outline && { outline }) };
+    const inFrame = parseElementId(scope);
+    if (inFrame) {
+      // A region of a frame: only that frame is read, its ids still saying
+      // which frame they are in.
+      const page = await this.#observeFrame(browser, inFrame.frame, {
+        ...args,
+        scope: inFrame.local,
+      });
+      if (!page || page.error) {
+        throw new Error(
+          page?.error ?? `${scope} is no longer on the page. Observe again.`
+        );
+      }
+      page.prefix = `f${inFrame.frame}.`;
+      return page;
+    }
+    if (scope) {
+      args.scope = scope;
+    }
     const deadline = Date.now() + LOAD_TIMEOUT_MS;
     let lastError = null;
+    let failures = 0;
     while (Date.now() < deadline) {
       try {
-        const page = await this.#runContent(browser, "agent.observe");
+        const page = await this.#runContent(browser, "agent.observe", args);
+        if (page.error) {
+          throw new ScopeRefused(page.error);
+        }
         if (!page.loading || Date.now() + RETRY_MS >= deadline) {
+          await this.#readFrames(
+            browser,
+            page,
+            args.outline ? { outline: true } : {}
+          );
           return page;
         }
       } catch (e) {
+        if (e instanceof ScopeRefused) {
+          throw e;
+        }
         lastError = e;
+        // A page between documents has no actor for a moment and is worth
+        // waiting for. An error on a settled page will come again: in dev
+        // testing one bug in the reader made every call wait out the whole
+        // 15 seconds before saying so.
+        if (!browser.webProgress?.isLoadingDocument && ++failures >= 3) {
+          throw new Error(`The page could not be read: ${e.message}`);
+        }
       }
       await sleep(RETRY_MS);
     }
@@ -609,8 +893,67 @@ export class LazyvimiumAgentToolbox {
     );
   }
 
-  async #observeText(browser) {
-    return formatObservation(await this.#observe(browser), this.#idOf(browser));
+  async #observeText(browser, options) {
+    return formatObservation(
+      await this.#observe(browser, options),
+      this.#idOf(browser)
+    );
+  }
+
+  // Where the tab and the frames in it stand in their changes, as one string
+  // that differs when anything does.
+  async #versionOf(browser, frame = null, depth = 0) {
+    const actor = frame === null ? null : this.#frameActor(browser, frame);
+    const info = actor
+      ? await this.#queryFrame(actor, "agent.version")
+      : frame === null && (await this.#runContent(browser, "agent.version"));
+    if (!info) {
+      return "gone";
+    }
+    const parts = [info.loading ? "loading" : info.version];
+    if (depth < MAX_FRAME_DEPTH) {
+      for (const id of info.frames.slice(0, MAX_FRAMES)) {
+        const version = await this.#versionOf(browser, id, depth + 1).catch(
+          () => "error"
+        );
+        parts.push(`${id}:${version}`);
+      }
+    }
+    return parts.join(",");
+  }
+
+  // Wait for the page to change instead of for a fixed time, then for the
+  // change to settle: a menu opening is a burst of them.
+  #wait({ tab, timeout_ms: timeout }) {
+    const limit = Math.min(
+      Math.max(timeout ?? WAIT_DEFAULT_MS, 100),
+      WAIT_MAX_MS
+    );
+    return this.#onTab(tab, "Waited for the page", async browser => {
+      const key = async () =>
+        `${browser.currentURI?.spec}|${browser.webProgress?.isLoadingDocument}|${await this.#versionOf(browser).catch(() => "error")}`;
+      const before = await key();
+      const deadline = Date.now() + limit;
+      let current = before;
+      while (current == before && Date.now() < deadline) {
+        await sleep(WAIT_POLL_MS);
+        current = await key();
+      }
+      const changed = current != before;
+      let quiet = 0;
+      const settled = Date.now() + WAIT_SETTLE_MAX_MS;
+      while (changed && quiet < 2 && Date.now() < settled) {
+        await sleep(WAIT_POLL_MS);
+        const next = await key();
+        quiet = next == current ? quiet + 1 : 0;
+        current = next;
+      }
+      const observation = await this.#observeText(browser);
+      return {
+        title: changed ? "The page changed" : "The page did not change",
+        text: `${changed ? "The page changed." : `The page did not change in ${limit} ms.`}\n\n${observation}`,
+      };
+    });
   }
 
   // A load to another site switches processes, and until the new document
@@ -634,6 +977,45 @@ export class LazyvimiumAgentToolbox {
     }
   }
 
+  // What the tab shows, frames of other sites included, as an image.
+  async #screenshot(browser) {
+    const window = this.window;
+    const { width, height } = browser.getBoundingClientRect();
+    if (!width || !height) {
+      return { text: "The tab has no size to capture.", isError: true };
+    }
+    const scale = Math.min(
+      window.devicePixelRatio,
+      SCREENSHOT_MAX_WIDTH / width
+    );
+    const image =
+      await browser.browsingContext.currentWindowGlobal.drawSnapshot(
+        null,
+        scale,
+        "white"
+      );
+    // Handing the bitmap to the canvas empties it.
+    const { width: shotWidth, height: shotHeight } = image;
+    const canvas = new window.OffscreenCanvas(shotWidth, shotHeight);
+    canvas
+      .getContext("bitmaprenderer", { alpha: false })
+      .transferFromImageBitmap(image);
+    const blob = await canvas.convertToBlob({
+      type: "image/jpeg",
+      quality: SCREENSHOT_QUALITY,
+    });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return {
+      title: "Took a screenshot",
+      text: `Screenshot of ${this.#idOf(browser)}, ${shotWidth}x${shotHeight}px, showing what is in view.`,
+      image: { data: window.btoa(binary), mimeType: "image/jpeg" },
+    };
+  }
+
   #act(args) {
     const { action, element, text, tab } = args;
     const title = [action, element, tab && `on ${tab}`]
@@ -641,15 +1023,23 @@ export class LazyvimiumAgentToolbox {
       .join(" ");
     return this.#onTab(tab, title, async browser => {
       let result;
-      try {
-        result = await this.#runContent(browser, "agent.act", {
-          action,
-          element,
-          text,
-        });
-      } catch {
-        // The page went away mid-action: a click that navigated.
-        result = { ok: true, done: `Did ${action}; the page navigated` };
+      const inFrame = parseElementId(element);
+      const actor = inFrame && this.#frameActor(browser, inFrame.frame);
+      if (inFrame && !actor) {
+        result = {
+          ok: false,
+          error: `${element} is no longer on the page. Observe again.`,
+        };
+      } else {
+        const local = { action, element: inFrame?.local ?? element, text };
+        try {
+          result = await (actor
+            ? this.#queryFrame(actor, "agent.act", local)
+            : this.#runContent(browser, "agent.act", local));
+        } catch {
+          // The page went away mid-action: a click that navigated.
+          result = { ok: true, done: `Did ${action}; the page navigated` };
+        }
       }
       if (result.ok && (action == "click" || action == "press")) {
         await this.#settleNavigation(browser);

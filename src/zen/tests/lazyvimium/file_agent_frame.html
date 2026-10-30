@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Card frame</title>
+</head>
+<body style="margin: 10px">
+  <form aria-label="Card details" onsubmit="event.preventDefault()">
+    <input id="card" aria-label="Card number">
+    <button id="pay" type="button">Pay now</button>
+  </form>
+  <p id="out">idle</p>
+  <script>
+    const out = document.getElementById("out");
+    document.getElementById("pay").addEventListener("click", event => {
+      out.textContent = event.isTrusted ? "paid" : "untrusted";
+    });
+  </script>
+</body>
+</html>

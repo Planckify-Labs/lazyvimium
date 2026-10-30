@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Frame host</title>
+</head>
+<body style="margin: 20px">
+  <p>Checkout</p>
+  <!-- Another site, so another process, as a payment form or a CAPTCHA is. -->
+  <iframe id="inner" title="Card form" width="320" height="160"
+          src="https://example.org/browser/zen/tests/lazyvimium/file_agent_frame.html"></iframe>
+  <!-- Out of sight, as tracking frames are. -->
+  <iframe id="pixel" width="1" height="1" src="about:blank"></iframe>
+</body>
+</html>

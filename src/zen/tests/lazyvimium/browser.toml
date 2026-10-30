@@ -8,7 +8,12 @@
 support-files = [
   "file_agent_start.html",
   "file_agent_next.html",
+  "file_agent_frame_host.html",
+  "file_agent_frame.html",
 ]
+
+["browser_lazyvimium_agent_bench.js"]
+support-files = ["file_agent_heavy.html"]
 
 ["browser_lazyvimium_explorer.js"]
 

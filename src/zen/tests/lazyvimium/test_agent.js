@@ -736,6 +736,155 @@ add_task(function test_observation_text() {
   );
 });
 
+add_task(function test_observation_text_reads_frames_and_hands_over_captchas() {
+  const page = {
+    url: "https://shop.example/",
+    title: "Shop",
+    scroll: { y: 0, height: 800, viewport: 800 },
+    elements: [],
+    text: "Pay",
+    frames: [
+      {
+        id: 7,
+        title: "Card",
+        src: "https://pay.example/card",
+        rect: { x: 10, y: 20, w: 300, h: 80 },
+        page: {
+          url: "https://pay.example/card",
+          title: "",
+          elements: [{ id: "e2", role: "textbox", label: "Number" }],
+          text: "Card number",
+          frames: [
+            {
+              id: 9,
+              title: "",
+              src: "https://www.google.com/recaptcha/api2/bframe",
+              rect: { x: 0, y: 0, w: 400, h: 500 },
+            },
+          ],
+        },
+      },
+      {
+        id: 8,
+        title: "",
+        src: "https://ads.example/",
+        rect: { x: 0, y: 700, w: 300, h: 100 },
+        page: null,
+      },
+      {
+        id: 11,
+        title: "",
+        src: "https://more.example/",
+        rect: { x: 0, y: 0, w: 10, h: 10 },
+        skipped: true,
+      },
+    ],
+  };
+  const text = formatObservation(page, "t1");
+  const frames = text.split("Visible text:\nPay\n")[1];
+  Assert.equal(
+    frames,
+    [
+      '\nFrame f7 "Card" at 10,20 300x80: https://pay.example/card',
+      "Elements in view:",
+      '[f7.e2] textbox "Number"',
+      "",
+      "Visible text:",
+      "Card number",
+      "",
+      "Frame f9 at 0,0 400x500: https://www.google.com/recaptcha/api2/bframe",
+      "This is a reCAPTCHA challenge, a check made for the user. Do not click in it or try to solve it. Tell the user to complete it, then observe again.",
+      "",
+      "Frame f8 at 0,700 300x100: https://ads.example/",
+      "(could not be read)",
+      "",
+      "Frame f11 at 0,0 10x10: https://more.example/",
+      "(not read: too many frames)",
+    ].join("\n")
+  );
+});
+
+add_task(function test_observation_text_shows_outline_and_accessible_state() {
+  const text = formatObservation({
+    url: "https://example.com/",
+    title: "Shop",
+    scroll: { y: 0, height: 800, viewport: 800 },
+    outline: [
+      { id: "e1", role: "main", label: "", inView: true },
+      { id: "e2", role: "heading", level: 1, label: "Shop", inView: true },
+      { id: "e3", role: "heading", level: 2, label: "Far", inView: false },
+      { id: "e4", role: "form", label: "Sign up", inView: true },
+    ],
+    elements: [
+      {
+        id: "e9",
+        role: "textbox",
+        label: "Email",
+        description: "We never share it",
+        value: "",
+        editable: true,
+        required: true,
+        invalid: true,
+        focused: true,
+      },
+      { id: "e10", role: "button", label: "Mute", pressed: "true" },
+    ],
+    text: "",
+  });
+  Assert.equal(
+    text.split("\n").slice(3).join("\n"),
+    [
+      "",
+      "Outline (use an id as scope to read only that part):",
+      "[e1] main",
+      '[e2] heading 1 "Shop"',
+      '  [e3] heading 2 "Far" (out of view)',
+      '[e4] form "Sign up"',
+      "",
+      "Elements in view:",
+      '[e9] textbox "Email" description="We never share it" value="" focused required invalid (editable)',
+      '[e10] button "Mute" pressed=true',
+      "",
+      "Visible text:",
+      "(none)",
+    ].join("\n")
+  );
+
+  const scoped = formatObservation({
+    url: "https://pay.example/",
+    title: "",
+    scroll: { y: 0, height: 100, viewport: 100 },
+    prefix: "f7.",
+    scope: "e3",
+    elements: [{ id: "e5", role: "button", label: "Pay" }],
+    text: "Pay",
+  });
+  ok(scoped.includes('Elements in f7.e3:\n[f7.e5] button "Pay"'), scoped);
+});
+
+add_task(async function test_a_screenshot_is_an_image_in_the_reply() {
+  const session = {
+    listTools: () => [],
+    callTool: async () => ({
+      text: "Screenshot of t1",
+      image: { data: "AAEC", mimeType: "image/jpeg" },
+    }),
+  };
+  const reply = await handleMcpMessage(session, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "page_screenshot", arguments: {} },
+  });
+  Assert.deepEqual(reply.result, {
+    content: [
+      { type: "text", text: "Screenshot of t1" },
+      { type: "image", data: "AAEC", mimeType: "image/jpeg" },
+    ],
+    isError: false,
+  });
+});
+
 add_task(async function test_log_redacts_and_rotates() {
   const dir = PathUtils.join(PathUtils.profileDir, "logs-test");
   const log = new LazyvimiumAgentLog({ dir, agent: "codex" });
