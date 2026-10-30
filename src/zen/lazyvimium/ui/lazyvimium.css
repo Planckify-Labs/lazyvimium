@@ -101,86 +101,95 @@
   }
 }
 
-/* The vim mode switch, green while on: in the top bar, or in the
-   row below the sidebar with Zen's single toolbar. */
+/* The vim mode switch, a pill with a status dot: grey while off, green while
+   on. It sits in the row below the sidebar with Zen's single toolbar, or in
+   the top bar with multiple toolbars. */
 #lazyvimium-vim-mode-button {
   align-items: center;
-  padding-inline: 4px;
+  padding-inline: 2px;
 
   & .lazyvimium-vim-mode {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     height: 26px;
-    padding: 0 6px 0 8px;
-    border: none;
+    padding: 0 11px 0 9px;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
     border-radius: 999px;
     corner-shape: round;
-    background: transparent;
+    background-color: transparent;
     color: inherit;
-    font: 600 11px/1 ui-monospace, monospace;
-    letter-spacing: 0.02em;
+    font: 700 10.5px/1 ui-monospace, monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition:
+      background-color 0.15s ease-out,
+      border-color 0.15s ease-out,
+      color 0.15s ease-out;
 
     &:hover {
       background-color: var(--toolbarbutton-hover-background, color-mix(in srgb, currentColor 12%, transparent));
     }
 
+    &:active {
+      background-color: var(--toolbarbutton-active-background, color-mix(in srgb, currentColor 20%, transparent));
+    }
+
     &:focus-visible {
       outline: 2px solid var(--focus-outline-color, AccentColor);
-      outline-offset: -2px;
+      outline-offset: 1px;
     }
   }
 
   & .lazyvimium-vim-mode-label {
-    opacity: 0.6;
+    opacity: 0.7;
+    transition: opacity 0.15s ease-out;
 
-    /* Moved into the narrow row above the sidebar, the switch keeps only its
-       track; its name is in the tooltip. */
-    #zen-sidebar-top-buttons & {
+    /* Moved into a narrow row, the switch keeps only its dot; its name is in
+       the tooltip. */
+    #zen-sidebar-top-buttons &,
+    :root:not([zen-sidebar-expanded="true"]) #zen-sidebar-foot-buttons & {
       display: none;
     }
   }
 
-  & .lazyvimium-vim-mode-track {
-    position: relative;
-    width: 26px;
-    height: 14px;
-    border-radius: 7px;
+  & .lazyvimium-vim-mode-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
     corner-shape: round;
-    background-color: color-mix(in srgb, currentColor 28%, transparent);
-    transition: background-color 0.15s ease-out;
-
-    & > span {
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      corner-shape: round;
-      background-color: light-dark(#ffffff, var(--lazyvimium-ink));
-      transition: translate 0.15s ease-out;
-    }
+    background-color: color-mix(in srgb, currentColor 40%, transparent);
+    transition:
+      background-color 0.15s ease-out,
+      box-shadow 0.15s ease-out;
   }
 
   &[checked] {
+    & .lazyvimium-vim-mode {
+      border-color: color-mix(in srgb, var(--lazyvimium-success) 55%, transparent);
+      background-color: color-mix(in srgb, var(--lazyvimium-success) 16%, transparent);
+      color: var(--lazyvimium-success);
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--lazyvimium-success) 26%, transparent);
+      }
+    }
+
     & .lazyvimium-vim-mode-label {
       opacity: 1;
     }
 
-    & .lazyvimium-vim-mode-track {
+    & .lazyvimium-vim-mode-dot {
       background-color: var(--lazyvimium-success);
-
-      & > span {
-        translate: 12px 0;
-        background-color: light-dark(#ffffff, var(--lazyvimium-ink));
-      }
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--lazyvimium-success) 28%, transparent);
     }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #lazyvimium-vim-mode-button :is(.lazyvimium-vim-mode-track, .lazyvimium-vim-mode-track > span) {
+  #lazyvimium-vim-mode-button :is(.lazyvimium-vim-mode, .lazyvimium-vim-mode-label, .lazyvimium-vim-mode-dot) {
     transition: none;
   }
 }

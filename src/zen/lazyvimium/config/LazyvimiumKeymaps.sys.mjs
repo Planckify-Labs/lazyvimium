@@ -136,6 +136,7 @@ export const LazyvimiumKeymapsSpec = {
     ],
     ["n", "<leader>m", "toolbar.open"],
     ["n", "<leader>uc", "zen.compactMode.toggle"],
+    ["n", "<leader>uR", "zen.layout.reset"],
     ["n", "<leader>ub", "ui.toggleDark"],
     ["n", "<leader>uz", "ui.readerMode"],
     ["n", "<leader>un", "ui.dismissNotifications"],

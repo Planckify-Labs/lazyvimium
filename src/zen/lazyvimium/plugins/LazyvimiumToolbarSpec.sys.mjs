@@ -35,7 +35,11 @@ export const LazyvimiumToolbarSpec = {
         if (toolbar?.isOpen) {
           toolbar.close();
         } else {
-          toolbar?.open({ at: context.window.PanelUI?.menuButton });
+          toolbar?.open({
+            at: context.window.PanelUI?.menuButton,
+            fromSidebar: !!context.lazyvimium.explorerFor(context.window)
+              ?.isOpen,
+          });
         }
       },
     },

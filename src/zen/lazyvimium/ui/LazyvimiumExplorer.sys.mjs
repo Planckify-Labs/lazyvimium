@@ -145,7 +145,6 @@ export class LazyvimiumExplorer {
     }
     const window = this.#window;
     this.#open = true;
-    this.#showSidebar();
     window.document.documentElement.setAttribute("lazyvimium-explorer", "true");
 
     this.#controller = new window.AbortController();
@@ -209,6 +208,8 @@ export class LazyvimiumExplorer {
     this.#followSelectedTab();
     this.#focus();
     this.#onChange();
+    // Once the toolbar this replaces has let go of the compact sidebar.
+    this.#showSidebar();
   }
 
   close() {

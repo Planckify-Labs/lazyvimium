@@ -22,6 +22,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const WIDGET_ID = "lazyvimium-vim-mode-button";
 const LABEL = "vim mode";
+// What the pill itself reads; LABEL names the widget in customize mode.
+const BUTTON_TEXT = "vim";
 const PREF_SINGLE_TOOLBAR = "zen.view.use-single-toolbar";
 const FOOT_AREA = "zen-sidebar-foot-buttons";
 // The foot row's + button, which the switch goes before.
@@ -89,13 +91,16 @@ export const LazyvimiumVimModeSwitch = {
         const button = document.createElementNS(HTML_NS, "button");
         button.className = "lazyvimium-vim-mode";
         button.setAttribute("role", "switch");
+        const dot = document.createElementNS(HTML_NS, "span");
+        dot.className = "lazyvimium-vim-mode-dot";
         const label = document.createElementNS(HTML_NS, "span");
         label.className = "lazyvimium-vim-mode-label";
-        label.textContent = LABEL;
-        const track = document.createElementNS(HTML_NS, "span");
-        track.className = "lazyvimium-vim-mode-track";
-        track.append(document.createElementNS(HTML_NS, "span"));
-        button.append(label, track);
+        label.textContent = BUTTON_TEXT;
+        button.append(dot, label);
+        // A click leaves the focus where it was, in the page: a focused
+        // switch would take Space, vim mode's <leader>, as another click,
+        // and keep every other key away from vim mode.
+        button.addEventListener("mousedown", event => event.preventDefault());
         button.addEventListener("click", () => {
           Services.prefs.setBoolPref(
             LazyvimiumOptions.PREF_ENABLED,
@@ -112,15 +117,19 @@ export const LazyvimiumVimModeSwitch = {
     if (!placedBefore) {
       moveHome();
     }
-    // Zen's layout can change while the browser runs. The switch follows it
-    // from one home to the other, but stays wherever the user moved it.
-    Services.prefs.addObserver(PREF_SINGLE_TOOLBAR, () => {
+    // Zen's layout can change while the browser runs, or while it was closed:
+    // a switch saved in the top bar by a multiple-toolbar session must not
+    // stay there once the single toolbar is back. It follows the layout from
+    // one home to the other, but stays wherever the user moved it.
+    const followLayout = () => {
       const area = lazy.CustomizableUI.getPlacementOfWidget(WIDGET_ID)?.area;
       const homes = [FOOT_AREA, lazy.CustomizableUI.AREA_NAVBAR];
       if (homes.includes(area) && area != homeArea()) {
         moveHome();
       }
-    });
+    };
+    followLayout();
+    Services.prefs.addObserver(PREF_SINGLE_TOOLBAR, followLayout);
   },
 
   /**

@@ -258,7 +258,7 @@ window.gZenCompactModeManager = {
     const fragment = window.MozXULElement.parseXULToFragment(`
       <menu id="zen-context-menu-compact-mode" data-l10n-id="zen-toolbar-context-compact-mode">
         <menupopup>
-          <menuitem id="zen-context-menu-compact-mode-toggle" data-l10n-id="zen-toolbar-context-compact-mode-enable" type="checkbox" command="cmd_zenCompactModeToggle"/>
+          <menuitem id="zen-context-menu-compact-mode-toggle" data-l10n-id="zen-toolbar-context-compact-mode-enable" type="checkbox" command="cmd_toggleCompactModeIgnoreHover"/>
           <menuseparator/>
           <menuitem id="zen-context-menu-compact-mode-hide-sidebar" data-l10n-id="zen-toolbar-context-compact-mode-just-tabs" type="radio" />
           <menuitem id="zen-context-menu-compact-mode-hide-toolbar" data-l10n-id="zen-toolbar-context-compact-mode-just-toolbar" type="radio" />

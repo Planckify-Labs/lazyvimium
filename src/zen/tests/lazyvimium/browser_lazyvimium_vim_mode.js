@@ -50,7 +50,7 @@ add_task(async function test_switch_has_room_in_either_layout() {
   ok(button, "it is built");
   Assert.equal(button.getAttribute("role"), "switch");
   Assert.equal(button.getAttribute("aria-checked"), "true", "on by default");
-  Assert.equal(button.textContent, "vim mode");
+  Assert.equal(button.textContent, "vim");
   ok(
     !document
       .getElementById("zen-toggle-compact-mode")
@@ -139,4 +139,82 @@ add_task(async function test_onboarding_looks_like_plain_zen() {
     "the mode indicator comes back after it"
   );
   ok(root.hasAttribute("lazyvimium-mode"));
+});
+
+// A click on the switch must leave the keys with vim mode, not with the
+// switch: Space after it is <leader>, not another click.
+add_task(async function test_clicking_the_switch_leaves_the_keys_to_vim() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "data:text/html,<title>switch</title>"
+  );
+  Services.prefs.setBoolPref(PREF, false);
+  EventUtils.synthesizeMouseAtCenter(switchButton(), {});
+  await TestUtils.waitForCondition(
+    () => Services.prefs.getBoolPref(PREF),
+    "the click turns vim mode on"
+  );
+  isnot(
+    document.activeElement,
+    switchButton(),
+    "the switch does not keep the focus"
+  );
+  EventUtils.synthesizeKey(" ");
+  EventUtils.synthesizeKey("e");
+  await TestUtils.waitForCondition(
+    () => Lazyvimium.explorerFor(window).isOpen,
+    "<leader>e opens the explorer"
+  );
+  ok(Services.prefs.getBoolPref(PREF), "and Space left vim mode on");
+  Lazyvimium.explorerFor(window).close();
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_sidebar_toggle_keeps_the_single_toolbar() {
+  const expanded = "zen.view.sidebar-expanded";
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref(expanded);
+    Services.prefs.clearUserPref(SINGLE_TOOLBAR);
+  });
+  Services.prefs.setBoolPref(SINGLE_TOOLBAR, true);
+  Services.prefs.setBoolPref(expanded, true);
+
+  await Lazyvimium.run("zen.sidebar.toggle");
+  ok(!Services.prefs.getBoolPref(expanded), "the sidebar collapses");
+  await Lazyvimium.run("zen.sidebar.toggle");
+  ok(Services.prefs.getBoolPref(expanded), "and expands again");
+  ok(
+    Services.prefs.getBoolPref(SINGLE_TOOLBAR),
+    "with the URL bar still in the sidebar"
+  );
+});
+
+add_task(async function test_layout_reset_returns_to_the_defaults() {
+  const prefs = [
+    [SINGLE_TOOLBAR, false],
+    ["zen.view.compact.hide-tabbar", false],
+    ["zen.view.compact.hide-toolbar", false],
+    ["zen.view.sidebar-expanded", false],
+  ];
+  const defaults = Services.prefs.getDefaultBranch("");
+  for (const [name, value] of prefs) {
+    Services.prefs.setBoolPref(name, value);
+  }
+
+  await Lazyvimium.run("zen.layout.reset");
+  for (const [name] of prefs) {
+    ok(
+      !Services.prefs.prefHasUserValue(name),
+      `${name} is back to its default`
+    );
+    Assert.equal(
+      Services.prefs.getBoolPref(name),
+      defaults.getBoolPref(name),
+      `${name} reads its default`
+    );
+  }
+  await TestUtils.waitForCondition(
+    () => !document.documentElement.hasAttribute("zen-compact-animating"),
+    "compact mode settles"
+  );
 });

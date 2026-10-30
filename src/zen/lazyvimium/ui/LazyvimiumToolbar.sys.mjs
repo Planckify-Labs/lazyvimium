@@ -31,6 +31,8 @@ export class LazyvimiumToolbar {
   #hints = null;
   /** @type {{element: Element, attribute: string}|null} What #show set. */
   #shown = null;
+  /** @type {Element|null} The only bar the items come from, when one is. */
+  #scope = null;
 
   /**
    * @param {Window} window A browser window.
@@ -85,6 +87,7 @@ export class LazyvimiumToolbar {
       )) {
         if (
           !item.parentElement.closest("#urlbar-container") &&
+          (!this.#scope || this.#scope.contains(item)) &&
           isOnScreen(item)
         ) {
           items.add(item);
@@ -111,16 +114,23 @@ export class LazyvimiumToolbar {
    *
    * @param {object} [options]
    * @param {Element} [options.at]
+   * @param {boolean} [options.fromSidebar] Opened from the explorer, whose
+   *   compact sidebar stays out for the toolbar.
    */
-  async open({ at } = {}) {
+  async open({ at, fromSidebar = false } = {}) {
     if (this.#open) {
       this.#moveToElement(at);
       return;
     }
     const window = this.#window;
+    const bar = this.#compactBar(fromSidebar);
+    // The top bar alone: the cursor stays on what is on screen.
+    this.#scope =
+      bar?.element == this.#wrapper && this.#isSingleToolbar
+        ? bar.element
+        : null;
     this.#open = true;
     window.document.documentElement.setAttribute("lazyvimium-toolbar", "true");
-    this.#show();
 
     this.#controller = new window.AbortController();
     const options = { capture: true, signal: this.#controller.signal };
@@ -150,6 +160,9 @@ export class LazyvimiumToolbar {
 
     this.#focus();
     this.#onChange();
+    // Once the explorer this replaces has let go of the compact sidebar,
+    // so the toolbar holds it instead of finding it shown and losing it.
+    this.#show(bar);
     // The bar may still be sliding in; place the cursor where it ends up.
     await new Promise(resolve => window.requestAnimationFrame(resolve));
     // Closed again before the bar came to rest.
@@ -157,7 +170,11 @@ export class LazyvimiumToolbar {
       return;
     }
     const items = this.items();
-    const start = at ?? window.document.getElementById("urlbar-container");
+    const start =
+      at ??
+      (this.#scope
+        ? items[0]
+        : window.document.getElementById("urlbar-container"));
     const index = items.indexOf(start);
     this.#setCursor(items, index == -1 ? 0 : index);
   }
@@ -176,6 +193,7 @@ export class LazyvimiumToolbar {
     this.#controller.abort();
     this.#cursor?.removeAttribute("lazyvimium-cursor");
     this.#cursor = null;
+    this.#scope = null;
     window.document.documentElement.removeAttribute("lazyvimium-toolbar");
     if (!keepBar) {
       this.#hide();
@@ -287,12 +305,35 @@ export class LazyvimiumToolbar {
     const triggerEvent = new window.CustomEvent("LazyvimiumMenu");
     item.dispatchEvent(triggerEvent);
     const { promise, resolve } = Promise.withResolvers();
-    popup.addEventListener("popuphidden", function onHidden(event) {
-      if (event.target == popup) {
-        popup.removeEventListener("popuphidden", onHidden);
-        resolve();
+    // A command picked from the menu is done with the toolbar, the way
+    // pressing an item is; a menu closed without one returns to it.
+    // An item with a command attribute has its command event sent to the
+    // <command> element instead, with the item's event as its source.
+    let commanded = false;
+    const onCommand = event => {
+      const source = event.sourceEvent?.target ?? event.target;
+      if (popup.contains(source)) {
+        commanded = true;
       }
-    });
+    };
+    window.addEventListener("command", onCommand, true);
+    const onHidden = event => {
+      if (event.target != popup) {
+        return;
+      }
+      window.removeEventListener("command", onCommand, true);
+      popup.removeEventListener("popuphidden", onHidden);
+      // Zen keeps the bar its menu opened from on screen (has-popup-menu)
+      // until the pointer comes back into the window. A menu opened from
+      // the keys has no pointer to wait for: let the bar go now, after
+      // Zen's own popuphidden handler.
+      window.setTimeout(() => this.#releasePopupHold(), 0);
+      if (commanded) {
+        this.close();
+      }
+      resolve();
+    };
+    popup.addEventListener("popuphidden", onHidden);
     popup.openPopup(item, {
       position: "after_start",
       isContextMenu: true,
@@ -354,27 +395,56 @@ export class LazyvimiumToolbar {
     this.#focusSink.focus();
   }
 
+  /**
+   * The bar compact mode should bring out, or null when it hides nothing.
+   * With the single toolbar the buttons are in the sidebar, which stays out
+   * when the toolbar is opened from it. Opened from the page, it is the top
+   * bar alone when Zen has moved the window buttons there (should-hide),
+   * the way pointing at the top edge shows it.
+   *
+   * @param {boolean} fromSidebar Whether it opens from the explorer.
+   * @returns {{element: Element, attribute: string}|null}
+   */
+  #compactBar(fromSidebar) {
+    const compact = this.#window.gZenCompactModeManager;
+    const wrapper = this.#wrapper;
+    if (!compact?.preference) {
+      return null;
+    }
+    if (
+      this.#isSingleToolbar &&
+      (fromSidebar || !wrapper?.hasAttribute("should-hide"))
+    ) {
+      return { element: compact.sidebar, attribute: "zen-user-show" };
+    }
+    return wrapper ? { element: wrapper, attribute: "zen-has-hover" } : null;
+  }
+
   // Compact mode hides the top bar until the pointer reaches the top edge,
   // and the sidebar until it reaches the side; the attribute each of those
   // sets keeps the toolbar on screen while the cursor is in it.
-  #show() {
+  #show(bar) {
     const compact = this.#window.gZenCompactModeManager;
     // Still ours when reopened before a press let the bar go.
-    if (this.#shown || !compact?.preference) {
+    if (this.#shown || !bar) {
       return;
     }
-    const [element, attribute] = this.#isSingleToolbar
-      ? [compact.sidebar, "zen-user-show"]
-      : [this.#wrapper, "zen-has-hover"];
-    if (!element) {
-      return;
-    }
+    const { element, attribute } = bar;
     const showing =
       element.hasAttribute(attribute) ||
-      (this.#isSingleToolbar && compact.isSidebarPotentiallyOpen());
+      (element == compact.sidebar && compact.isSidebarPotentiallyOpen());
     if (!showing) {
       element.setAttribute(attribute, "true");
-      this.#shown = { element, attribute };
+      this.#shown = bar;
+    }
+  }
+
+  #releasePopupHold() {
+    const compact = this.#window.gZenCompactModeManager;
+    for (const element of [compact?.sidebar, this.#wrapper]) {
+      if (element?.hasAttribute("has-popup-menu")) {
+        compact._setElementExpandAttribute(element, false, "has-popup-menu");
+      }
     }
   }
 

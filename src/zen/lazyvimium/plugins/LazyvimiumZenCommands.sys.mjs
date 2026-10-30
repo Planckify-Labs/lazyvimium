@@ -6,9 +6,26 @@
 // rest are wrapped as zen.<name> from the ids found in the first window
 // (opts.commands), so new Zen commands show up without changes here.
 
+const PREF_SIDEBAR_EXPANDED = "zen.view.sidebar-expanded";
+
+// The layout prefs the compact mode menu, the sidebar toggle and Zen's
+// settings write. Clearing them returns the browser to its defaults.
+const LAYOUT_PREFS = [
+  "zen.view.sidebar-expanded",
+  "zen.view.use-single-toolbar",
+  "zen.view.compact.hide-tabbar",
+  "zen.view.compact.hide-toolbar",
+  "zen.view.compact.enable-at-startup",
+  "zen.tabs.vertical.right-side",
+];
+
+// Compact mode is toggled the way the sidebar's button does it: a pointer
+// resting over the sidebar must not pull it back while it slides away.
 const CURATED = {
-  "zen.compactMode.toggle": ["cmd_zenCompactModeToggle", "Toggle Compact Mode"],
-  "zen.sidebar.toggle": ["cmd_zenToggleSidebar", "Toggle Sidebar"],
+  "zen.compactMode.toggle": [
+    "cmd_toggleCompactModeIgnoreHover",
+    "Toggle Compact Mode",
+  ],
   "zen.library.toggle": ["cmd_zenToggleLibrary", "Toggle Library"],
   "spaces.next": ["cmd_zenWorkspaceForward", "Next Space"],
   "spaces.prev": ["cmd_zenWorkspaceBackward", "Prev Space"],
@@ -47,8 +64,43 @@ export const LazyvimiumZenCommandsSpec = {
   name: "zen-commands",
   opts: { commands: [] },
   actions(plugin, opts) {
-    const actions = {};
-    const curatedCommands = new Set();
+    // Zen's own sidebar toggle also turns its single toolbar off for good,
+    // which puts the URL bar back in the top bar after the sidebar opens
+    // again. A collapsed sidebar already falls back to the top bar by itself,
+    // so this only flips the sidebar.
+    const actions = {
+      "zen.sidebar.toggle": {
+        desc: "Toggle Sidebar",
+        agent: "act",
+        run: () =>
+          Services.prefs.setBoolPref(
+            PREF_SIDEBAR_EXPANDED,
+            !Services.prefs.getBoolPref(PREF_SIDEBAR_EXPANDED)
+          ),
+      },
+      "zen.layout.reset": {
+        desc: "Reset Layout to Defaults",
+        run: ({ window }) => {
+          for (const pref of LAYOUT_PREFS) {
+            Services.prefs.clearUserPref(pref);
+          }
+          // The compact mode flag only applies at startup; set it now.
+          const compact = window.gZenCompactModeManager;
+          if (compact) {
+            compact.preference = Services.prefs.getBoolPref(
+              "zen.view.compact.enable-at-startup",
+              false
+            );
+          }
+        },
+      },
+    };
+    // Covered above: by the sidebar toggle, and by the curated compact
+    // mode toggle, which runs its hover-safe variant.
+    const curatedCommands = new Set([
+      "cmd_zenToggleSidebar",
+      "cmd_zenCompactModeToggle",
+    ]);
     for (const [id, [commandId, desc]] of Object.entries(CURATED)) {
       curatedCommands.add(commandId);
       actions[id] = {

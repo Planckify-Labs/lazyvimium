@@ -743,3 +743,323 @@ add_task(async function test_explorer_and_toolbar_take_turns() {
   );
   explorer().close();
 });
+
+async function settleCompactMode() {
+  await TestUtils.waitForCondition(
+    () => !document.documentElement.hasAttribute("zen-compact-animating"),
+    "compact mode settles"
+  );
+}
+
+// Turning compact mode on from the toolbar with the keys must put the
+// sidebar away like clicking its button does.
+add_task(async function test_compact_mode_from_the_toolbar_hides_the_sidebar() {
+  for (const single of [true, false]) {
+    await setSingleToolbar(single);
+    await checkCompactFromToolbar();
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
+async function checkCompactFromToolbar() {
+  const tab = await openPage("compact from keys");
+  await settleCompactMode();
+  gZenCompactModeManager.preference = false;
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.preference,
+    "compact mode is off"
+  );
+  await settleCompactMode();
+
+  await openExplorer(tab);
+  pressLeader("m");
+  await TestUtils.waitForCondition(
+    () => toolbar().isOpen,
+    "<leader>m opens the toolbar over the explorer"
+  );
+  const button = document.querySelector(
+    "#zen-toggle-compact-mode toolbarbutton"
+  );
+  const index = toolbar().items().indexOf(button);
+  Assert.greater(index, -1, "the compact mode button is in the toolbar");
+  toolbar().moveTo(index);
+  press("KEY_Enter");
+  await TestUtils.waitForCondition(
+    () => gZenCompactModeManager.preference,
+    "the button turns compact mode on"
+  );
+  await settleCompactMode();
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.isSidebarPotentiallyOpen(),
+    "the sidebar slides away"
+  );
+  ok(!explorer().isOpen, "and the explorer is closed with it");
+  BrowserTestUtils.removeTab(tab);
+}
+
+// The toolbar's m menu has its own compact mode item, which runs Zen's
+// toggle without the button's hover guard.
+add_task(
+  async function test_compact_mode_from_the_toolbar_menu_hides_the_sidebar() {
+    for (const single of [true, false]) {
+      await setSingleToolbar(single);
+      await checkCompactFromToolbarMenu();
+      await SpecialPowers.popPrefEnv();
+    }
+  }
+);
+
+async function checkCompactFromToolbarMenu() {
+  const tab = await openPage("compact from the menu");
+  await settleCompactMode();
+  gZenCompactModeManager.preference = false;
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.preference,
+    "compact mode is off"
+  );
+  await settleCompactMode();
+
+  await openExplorer(tab);
+  pressLeader("m");
+  await TestUtils.waitForCondition(
+    () => toolbar().isOpen,
+    "<leader>m opens the toolbar over the explorer"
+  );
+  const menu = document.getElementById("toolbar-context-menu");
+  const shown = BrowserTestUtils.waitForPopupEvent(menu, "shown");
+  press("m");
+  await shown;
+  // The pointer rests over the sidebar, as it does after using it.
+  const sidebar = gNavToolbox.getBoundingClientRect();
+  window.synthesizeMouseEvent(
+    "mousemove",
+    sidebar.left + sidebar.width / 2,
+    sidebar.top + sidebar.height / 2,
+    {}
+  );
+  const item = document.getElementById("zen-context-menu-compact-mode-toggle");
+  const hidden = BrowserTestUtils.waitForPopupEvent(menu, "hidden");
+  if (item.parentElement == menu) {
+    menu.activateItem(item);
+  } else {
+    // In the compact mode submenu with multiple toolbars, which Zen's
+    // missing access keys keep a test from opening.
+    item.doCommand();
+    menu.hidePopup();
+  }
+  await hidden;
+  await TestUtils.waitForCondition(
+    () => gZenCompactModeManager.preference,
+    "the menu turns compact mode on"
+  );
+  await settleCompactMode();
+  ok(!toolbar().isOpen, "the toolbar closes with the menu's command");
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.isSidebarPotentiallyOpen(),
+    "the sidebar slides away"
+  );
+  ok(
+    !gNavToolbox.hasAttribute("has-popup-menu"),
+    "the menu, opened from the keys, does not hold the sidebar for the pointer"
+  );
+  if (!single()) {
+    ok(
+      !document
+        .getElementById("zen-appcontent-navbar-wrapper")
+        .hasAttribute("zen-has-hover"),
+      "and so does the top bar"
+    );
+  }
+  BrowserTestUtils.removeTab(tab);
+}
+
+function single() {
+  return document.documentElement.hasAttribute("zen-single-toolbar");
+}
+
+// In compact mode with the single toolbar, the toolbar's items are in the
+// sidebar: moving between the explorer and the toolbar keeps it out.
+add_task(
+  async function test_compact_sidebar_stays_between_explorer_and_toolbar() {
+    await setSingleToolbar(true);
+    const tab = await openPage("compact handoff");
+    await settleCompactMode();
+    gZenCompactModeManager.preference = true;
+    await TestUtils.waitForCondition(
+      () => gZenCompactModeManager.preference,
+      "compact mode is on"
+    );
+    await settleCompactMode();
+
+    await openExplorer(tab);
+    ok(
+      gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "the explorer shows it"
+    );
+    pressLeader("m");
+    await TestUtils.waitForCondition(
+      () => toolbar().isOpen && !explorer().isOpen,
+      "<leader>m moves to the toolbar"
+    );
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    ok(
+      gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "the sidebar stays out for the toolbar"
+    );
+    ok(
+      !document
+        .getElementById("zen-appcontent-navbar-wrapper")
+        .hasAttribute("zen-has-hover"),
+      "without the top bar"
+    );
+    pressLeader("e");
+    await TestUtils.waitForCondition(
+      () => explorer().isOpen && !toolbar().isOpen,
+      "<leader>e moves back to the explorer"
+    );
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    ok(
+      gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "and it stays out for the explorer"
+    );
+    press("q");
+    await TestUtils.waitForCondition(
+      () => !gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "closing the explorer still slides it away"
+    );
+
+    gZenCompactModeManager.preference = false;
+    await TestUtils.waitForCondition(
+      () => !gZenCompactModeManager.preference,
+      "compact mode is off again"
+    );
+    await settleCompactMode();
+    BrowserTestUtils.removeTab(tab);
+    await SpecialPowers.popPrefEnv();
+  }
+);
+
+// From the page, <leader>m brings out the top bar Zen moves the window
+// buttons to, alone, the way pointing at the top edge does; the sidebar
+// stays away.
+add_task(async function test_toolbar_shows_the_compact_top_bar() {
+  await setSingleToolbar(true);
+  const tab = await openPage("compact top bar");
+  await settleCompactMode();
+  gZenCompactModeManager.preference = true;
+  await TestUtils.waitForCondition(
+    () => gZenCompactModeManager.preference,
+    "compact mode is on"
+  );
+  await settleCompactMode();
+  const wrapper = document.getElementById("zen-appcontent-navbar-wrapper");
+  if (!wrapper.hasAttribute("should-hide")) {
+    info("Zen keeps the window buttons in the sidebar here; nothing to show");
+  } else {
+    // The pointer rests on the page, away from the sidebar's edge.
+    window.synthesizeMouseEvent(
+      "mousemove",
+      window.innerWidth / 2,
+      window.innerHeight / 2,
+      {}
+    );
+    await TestUtils.waitForCondition(
+      () => !gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "the sidebar is away"
+    );
+    ok(!wrapper.hasAttribute("zen-has-hover"), "the top bar starts hidden");
+    await openToolbar(tab);
+    ok(wrapper.hasAttribute("zen-has-hover"), "<leader>m shows the top bar");
+    ok(
+      !gZenCompactModeManager.isSidebarPotentiallyOpen(),
+      "and not the sidebar"
+    );
+    const buttons = gZenVerticalTabsManager.actualWindowButtons;
+    ok(
+      buttons.contains(toolbar().item),
+      "the cursor starts on the window buttons"
+    );
+    ok(
+      toolbar()
+        .items()
+        .every(item => wrapper.contains(item)),
+      "and stays in the top bar"
+    );
+    press("q");
+    await TestUtils.waitForCondition(
+      () => !wrapper.hasAttribute("zen-has-hover"),
+      "q hides the top bar again"
+    );
+  }
+  gZenCompactModeManager.preference = false;
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.preference,
+    "compact mode is off again"
+  );
+  await settleCompactMode();
+  BrowserTestUtils.removeTab(tab);
+  await SpecialPowers.popPrefEnv();
+});
+
+// Leaving compact mode with a click on the sidebar's button, then opening
+// the explorer: its keys must work.
+add_task(async function test_explorer_keys_after_clicking_compact_mode_off() {
+  const tab = await openPage("compact off by click");
+  await openPage("second");
+  gBrowser.selectedTab = tab;
+  await settleCompactMode();
+  gZenCompactModeManager.preference = true;
+  await TestUtils.waitForCondition(
+    () => gZenCompactModeManager.preference,
+    "compact mode is on"
+  );
+  await settleCompactMode();
+
+  // The pointer brings the sidebar in, and clicks its compact mode button.
+  gNavToolbox.setAttribute("zen-user-show", "true");
+  await TestUtils.waitForCondition(
+    () => gZenCompactModeManager.isSidebarPotentiallyOpen(),
+    "the sidebar is in"
+  );
+  const button = document.querySelector(
+    "#zen-toggle-compact-mode toolbarbutton"
+  );
+  let last = null;
+  await TestUtils.waitForCondition(() => {
+    const { x, y, width } = button.getBoundingClientRect();
+    const settled =
+      width > 0 &&
+      x >= 0 &&
+      x + width <= window.innerWidth &&
+      last?.x == x &&
+      last?.y == y;
+    last = { x, y };
+    return settled;
+  }, "the sidebar has slid in");
+  EventUtils.synthesizeMouseAtCenter(button, {});
+  await TestUtils.waitForCondition(
+    () => !gZenCompactModeManager.preference,
+    "the click turns compact mode off"
+  );
+  await settleCompactMode();
+
+  pressLeader("e");
+  await TestUtils.waitForCondition(
+    () => explorer().isOpen,
+    "<leader>e opens the explorer"
+  );
+  const before = cursorIndex();
+  press("j");
+  await TestUtils.waitForCondition(
+    () => cursorIndex() != before,
+    "j moves the explorer's cursor"
+  );
+  press("q");
+  await TestUtils.waitForCondition(() => !explorer().isOpen, "q closes it");
+  pressLeader("e");
+  await TestUtils.waitForCondition(
+    () => explorer().isOpen,
+    "and <leader>e opens it again"
+  );
+  explorer().close();
+});
