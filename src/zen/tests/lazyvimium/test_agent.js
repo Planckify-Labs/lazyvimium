@@ -19,7 +19,7 @@ const {
 const { LazyvimiumAgentServer, handleMcpMessage } = ChromeUtils.importESModule(
   "resource:///modules/lazyvimium/agent/LazyvimiumAgentServer.sys.mjs"
 );
-const { formatObservation } = ChromeUtils.importESModule(
+const { formatObservation, normalizeCall } = ChromeUtils.importESModule(
   "resource:///modules/lazyvimium/agent/LazyvimiumAgentTools.sys.mjs"
 );
 const { Subprocess } = ChromeUtils.importESModule(
@@ -355,6 +355,117 @@ add_task(function test_antigravity_driver() {
     { type: "text", text: "k", delta: true },
     { type: "done", error: null },
   ]);
+});
+
+add_task(function test_antigravity_hides_schema_reads_and_wrappers() {
+  const step = (tool_name, parameters) => ({
+    event: "step_update",
+    step_update: {
+      step_type: "tool",
+      state: "ACTIVE",
+      tool_name,
+      tool_info: { name: tool_name, parameters },
+    },
+  });
+  // Recorded from agy 1.4.11: it reads a tool's schema file, then calls the
+  // tool through call_mcp_tool.
+  Assert.deepEqual(
+    parseAll("antigravity", [
+      step("read_file", {
+        Path: "/home/u/.gemini/antigravity-cli/mcp/lazyvimium/page_act.json",
+      }),
+      step("call_mcp_tool", {
+        ServerName: "lazyvimium",
+        ToolName: "page_act",
+        Arguments: { action: "click", element: "e1" },
+      }),
+    ]),
+    [],
+    "neither the schema read nor our own tool is a row"
+  );
+  Assert.deepEqual(
+    parseAll("antigravity", [
+      step("read_file", { Path: "/home/u/notes.txt" }),
+      step("call_mcp_tool", {
+        ServerName: "other",
+        ToolName: "lookup",
+        Arguments: { q: 1 },
+      }),
+      step("read_url_content", { Url: "https://example.com" }),
+    ]),
+    [
+      { type: "tool", name: "read_file", input: { Path: "/home/u/notes.txt" } },
+      { type: "tool", name: "other.lookup", input: { q: 1 } },
+      {
+        type: "tool",
+        name: "read_url_content",
+        input: { Url: "https://example.com" },
+      },
+    ],
+    "other reads, other servers' tools and agy's own web fetch show"
+  );
+});
+
+add_task(function test_calls_are_taken_as_the_agent_meant_them() {
+  const names = ["page_observe", "page_act", "browser_action", "tab_close"];
+  const norm = (name, args) => normalizeCall(name, args, names);
+
+  // agy's wrapper, plain and nested again, and with the arguments beside it.
+  Assert.deepEqual(
+    norm("call_mcp_tool", {
+      ServerName: "lazyvimium",
+      ToolName: "browser_action",
+      Arguments: { id: "scroll.pageDown", tab: "t1" },
+    }),
+    {
+      name: "browser_action",
+      args: { id: "scroll.pageDown", args: undefined, tab: "t1" },
+    }
+  );
+  Assert.deepEqual(
+    norm("call_mcp_tool", {
+      ServerName: "lazyvimium",
+      ToolName: "call_mcp_tool",
+      Arguments: {
+        ServerName: "lazyvimium",
+        ToolName: "page_observe",
+        Arguments: { tab: "t2" },
+      },
+    }),
+    { name: "page_observe", args: { tab: "t2" } }
+  );
+  Assert.equal(
+    norm("page_act", { ServerName: "x", ToolName: "page_act", action: "click" })
+      .args.ServerName,
+    undefined
+  );
+  Assert.equal(norm("mcp__lazyvimium__page_act", {}).name, "page_act");
+  Assert.equal(norm("lazyvimium.tab_close", {}).name, "tab_close");
+  Assert.equal(norm("nope", {}).name, "nope");
+
+  // Argument names from memory.
+  let { args } = norm("page_act", { action: "click", id: "e75", tab: "t7" });
+  Assert.equal(args.element, "e75");
+  ({ args } = norm("page_act", { action: "click", target: "e5" }));
+  Assert.equal(args.element, "e5");
+  ({ args } = norm("page_act", { action: "fill", element: "e2", value: "Mr" }));
+  Assert.equal(args.text, "Mr");
+  ({ args } = norm("page_act", { action: "key", key: "Enter" }));
+  Assert.deepEqual([args.action, args.text], ["press", "Enter"]);
+  ({ args } = norm("page_act", {
+    action: "scroll",
+    direction: "down",
+    distance: 800,
+  }));
+  Assert.deepEqual([args.action, args.text], ["scroll", "down"]);
+  ({ args } = norm("page_act", { action: "scroll_up" }));
+  Assert.deepEqual([args.action, args.text], ["scroll", "up"]);
+  ({ args } = norm("page_act", { action: "constructor" }));
+  Assert.equal(args.action, "constructor", "no alias from the prototype");
+  ({ args } = norm("page_act", { action: "click", element: "e1", id: "e9" }));
+  Assert.equal(args.element, "e1", "the real name wins");
+  ({ args } = norm("browser_action", { action: "history.back", count: 2 }));
+  Assert.deepEqual([args.id, args.args], ["history.back", { count: 2 }]);
 });
 
 add_task(async function test_antigravity_connects_once() {

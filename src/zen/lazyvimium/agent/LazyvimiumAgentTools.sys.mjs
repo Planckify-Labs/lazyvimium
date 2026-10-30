@@ -429,6 +429,119 @@ export function toolDefinitions(registry) {
   ];
 }
 
+// What agents call page_act's actions when they guess: keys from the dev
+// logs of agy's Gemini ("key", "scroll_down") and opencode's models.
+const ACT_ALIASES = {
+  key: { action: "press" },
+  keypress: { action: "press" },
+  press_key: { action: "press" },
+  type: { action: "fill" },
+  input: { action: "fill" },
+  type_text: { action: "fill" },
+  enter_text: { action: "fill" },
+  set_value: { action: "fill" },
+  select_option: { action: "select" },
+  tap: { action: "click" },
+  scroll_down: { action: "scroll", text: "down" },
+  scroll_up: { action: "scroll", text: "up" },
+};
+
+function firstOf(args, names) {
+  const name = names.find(key => args[key] !== undefined && args[key] !== null);
+  return name && args[name];
+}
+
+/**
+ * Take a call as an agent made it to the one the tools understand. Agents
+ * name arguments from memory and agy wraps every MCP call: in dev logs,
+ * Gemini sent {ServerName, ToolName, Arguments} to a tool named
+ * call_mcp_tool (twice nested at times), and `id`, `target`, `value` or
+ * `direction` for page_act's `element` and `text`, so a third of its
+ * actions failed on the names alone.
+ *
+ * @param {string} name The tool name as received.
+ * @param {object} args The arguments as received.
+ * @param {string[]} names The tools there are.
+ * @returns {{name: string, args: object}}
+ */
+export function normalizeCall(name, args, names) {
+  let tool = String(name ?? "");
+  let params = args && typeof args == "object" ? { ...args } : {};
+  for (let i = 0; i < 3 && typeof params.ToolName == "string"; i++) {
+    const { ToolName, Arguments, ...rest } = params;
+    delete rest.ServerName;
+    tool = ToolName;
+    params = {
+      ...rest,
+      ...(Arguments && typeof Arguments == "object" ? Arguments : {}),
+    };
+  }
+  // "lazyvimium.page_act", "mcp__lazyvimium__page_act" and the like.
+  if (!names.includes(tool)) {
+    tool =
+      names.find(known => new RegExp(`[.:/_-]${known}$`).test(tool)) ?? tool;
+  }
+  switch (tool) {
+    case "page_act": {
+      const alias = Object.hasOwn(ACT_ALIASES, params.action)
+        ? ACT_ALIASES[params.action]
+        : null;
+      params = {
+        ...params,
+        ...alias,
+        element: firstOf(params, [
+          "element",
+          "id",
+          "target",
+          "ref",
+          "element_id",
+          "elementId",
+        ]),
+        text:
+          alias?.text ??
+          firstOf(params, [
+            "text",
+            "value",
+            "key",
+            "keys",
+            "direction",
+            "scroll",
+            "option",
+            "query",
+          ]),
+      };
+      break;
+    }
+    case "page_navigate":
+      params = {
+        ...params,
+        url: firstOf(params, ["url", "address", "href"]),
+        newTab: params.newTab ?? params.new_tab,
+      };
+      break;
+    case "page_wait":
+      params = {
+        ...params,
+        timeout_ms: firstOf(params, ["timeout_ms", "timeout", "ms"]),
+      };
+      break;
+    case "tab_switch":
+    case "tab_close":
+      params = { ...params, tab: firstOf(params, ["tab", "id", "tab_id"]) };
+      break;
+    case "browser_action": {
+      const { id, action, command, args: given, tab, ...rest } = params;
+      params = {
+        id: id ?? command ?? action,
+        args: given ?? (Object.keys(rest).length ? rest : undefined),
+        tab,
+      };
+      break;
+    }
+  }
+  return { name: tool, args: params };
+}
+
 function paramsText(action) {
   const names = Object.entries(action.params);
   return names.length
@@ -494,8 +607,13 @@ export class LazyvimiumAgentToolbox {
 
   // Every call goes in the log with the full text the agent got back: what
   // it saw is usually why it did what it did.
-  async callTool(name, args) {
+  async callTool(received, given) {
     const started = Date.now();
+    const { name, args } = normalizeCall(
+      received,
+      given,
+      this.listTools().map(tool => tool.name)
+    );
     let result;
     try {
       result = await this.#callTool(name, args);
@@ -507,6 +625,7 @@ export class LazyvimiumAgentToolbox {
       this.log?.write("tool", {
         name,
         args,
+        ...(received != name && { received }),
         ms: Date.now() - started,
         isError: !!result?.isError,
         title: this.#lastTitle,
@@ -551,7 +670,11 @@ export class LazyvimiumAgentToolbox {
       case "ui_guide":
         return { text: uiGuide(args.topic) };
     }
-    throw new Error(`Unknown tool ${name}`);
+    throw new Error(
+      `Unknown tool ${name}. The tools are ${this.listTools()
+        .map(tool => tool.name)
+        .join(", ")}.`
+    );
   }
 
   // The table or page is its own row in the panel, so no step row.
@@ -1170,7 +1293,14 @@ export class LazyvimiumAgentToolbox {
       return { text: `There is no browser command "${id}"`, isError: true };
     }
     return this.#onTab(tab, action.desc, async browser => {
-      this.lazyvimium.actions.validate(id, args);
+      try {
+        this.lazyvimium.actions.validate(id, args);
+      } catch (e) {
+        // Say what it does take: agents pass `text` to commands that take
+        // none.
+        const takes = paramsText(action) || " (it takes no args)";
+        return { text: `${e.message}${takes}`, isError: true };
+      }
       if (
         action.agent == "confirm" &&
         !(await this.confirm(action.desc.toLowerCase()))

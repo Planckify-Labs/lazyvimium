@@ -199,6 +199,50 @@ add_task(async function test_act_refuses_changed_and_covered_elements() {
   BrowserTestUtils.removeTab(tab);
 });
 
+add_task(async function test_act_survives_a_ticking_row_and_guessed_names() {
+  const tab = await openPage();
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  await SpecialPowers.spawn(browser, [], () => {
+    const row = content.document.createElement("div");
+    row.id = "row";
+    row.innerHTML =
+      '<a id="pair" href="#pair">Token</a> <span id="price">$0.0004425</span> <span id="age">13h</span>';
+    content.document.body.append(row);
+  });
+  let { text } = await box.callTool("page_observe", {});
+  const pair = idOf(text, 'link "Token"');
+
+  // A market data row rewrites its numbers every few seconds.
+  await SpecialPowers.spawn(browser, [], () => {
+    content.document.getElementById("price").textContent = "$0.0004591";
+    content.document.getElementById("age").textContent = "14h";
+  });
+  // The wrong names an agent guessed in dev logs: id for element.
+  let result = await box.callTool("page_act", { action: "click", id: pair });
+  ok(!result.isError, result.text);
+
+  // Other words in the row are another row in a reused node.
+  await SpecialPowers.spawn(browser, [], () => {
+    content.document.getElementById("price").textContent = "delisted";
+  });
+  result = await box.callTool("page_act", { action: "click", element: pair });
+  ok(result.isError, "a row with other words is not clicked");
+  ok(result.text.includes("changed since it was observed"), result.text);
+
+  // agy's wrapper around the same call, and a call with no element at all.
+  ({ text } = await box.callTool("page_observe", {}));
+  result = await box.callTool("call_mcp_tool", {
+    ServerName: "lazyvimium",
+    ToolName: "page_act",
+    Arguments: { action: "click", target: idOf(text, 'link "Token"') },
+  });
+  ok(!result.isError, result.text);
+  result = await box.callTool("page_act", { action: "click" });
+  ok(result.isError && result.text.includes('needs "element"'), result.text);
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_confirm_actions_ask_the_user() {
   const tab = await openPage();
   const questions = [];

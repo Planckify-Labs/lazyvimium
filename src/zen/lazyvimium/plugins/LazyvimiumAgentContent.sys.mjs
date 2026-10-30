@@ -510,8 +510,16 @@ function guardOf(element) {
     element.getAttribute("aria-checked"),
     element.getAttribute("aria-selected"),
     element.getAttribute("href"),
-    scope?.innerText?.slice(0, 2000) ?? "",
+    stableText(scope?.innerText?.slice(0, 2000) ?? ""),
   ]);
+}
+
+// The words around a control, without the numbers: a ticking table (prices,
+// counts, ages) rewrites its rows every few seconds, and in dev testing the
+// agent was told "changed since it was observed" on the same row over and
+// over. A node a framework reuses for another row still changes the words.
+function stableText(text) {
+  return text.replace(/[$€£+\-−]?\d[\d.,:]*[%a-zA-Z]{0,2}(?![a-zA-Z])/g, "#");
 }
 
 // Controls in the document and in every shadow root under it, including
@@ -1019,7 +1027,9 @@ function resolveElement(window, elementId) {
   const match = /^e(\d+)$/.exec(String(elementId ?? ""));
   if (!match) {
     throw new LazyvimiumStalePage(
-      `"${elementId}" is not an element id from page_observe`
+      elementId == null
+        ? 'This needs "element": an id such as e12 from page_observe'
+        : `"${elementId}" is not an element id from page_observe`
     );
   }
   const id = Number(match[1]);
@@ -1440,7 +1450,9 @@ async function perform(window, { action, element: elementId, text }) {
       }[action];
     }
   }
-  throw new Error(`Unknown action "${action}"`);
+  throw new Error(
+    `Unknown action "${action}". Use click, fill, select, press or scroll.`
+  );
 }
 
 export const actions = {
