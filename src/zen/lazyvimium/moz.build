@@ -10,6 +10,7 @@ EXTRA_JS_MODULES.lazyvimium.agent += [
     "agent/LazyvimiumAgentDetect.sys.mjs",
     "agent/LazyvimiumAgentHarness.sys.mjs",
     "agent/LazyvimiumAgentLog.sys.mjs",
+    "agent/LazyvimiumAgentNetwork.sys.mjs",
     "agent/LazyvimiumAgents.sys.mjs",
     "agent/LazyvimiumAgentServer.sys.mjs",
     "agent/LazyvimiumAgentTools.sys.mjs",

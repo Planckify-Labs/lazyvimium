@@ -41,5 +41,8 @@
 - name: lazyvimium.agent.log.stdout
   value: false # also a one-line summary per entry on stdout; npm run dev turns it on
 
+- name: lazyvimium.agent.network
+  value: true # agents read the requests a page made (network_list, network_read); recording starts when the agent panel first opens and keeps the latest 300 requests per tab, text bodies up to 1 MB each, 24 MB in all
+
 - name: lazyvimium.agent.a11y
   value: false # agents read control names, descriptions and states from Gecko's accessibility tree; off by default: it keeps the engine on in the page's process (tens of MB, slower loads) and adds about 1% to what an agent reads

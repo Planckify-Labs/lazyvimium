@@ -803,6 +803,7 @@ add_task(function test_observation_text() {
       "Title: Example",
       "URL: https://example.com/",
       "Scroll: 0 of 1200px",
+      "More below: 1200px, about 2 screens. The controls and text listed are only what is in view.",
       'Selected text: "picked words"',
       "",
       "Elements in view:",
@@ -844,6 +845,52 @@ add_task(function test_observation_text() {
       '[e70] button "Play" (covered by ytmusic-player-page "Up next")'
     ),
     "covered controls say so"
+  );
+});
+
+add_task(function test_observation_text_says_what_it_does_not_show() {
+  const text = formatObservation(
+    {
+      url: "https://dex.example/",
+      title: "Pairs",
+      scroll: { y: 0, height: 5000, viewport: 1000 },
+      elements: [],
+      text: "TRUMP",
+      textCut: true,
+      data: [
+        {
+          id: "e301",
+          kind: "table",
+          label: "Trending",
+          rows: 100,
+          cols: 11,
+          inView: 14,
+          first: "#1 | TRUMP",
+        },
+      ],
+      pagers: [
+        { id: "e44", role: "link", label: "Pairs 201-300", where: "below" },
+      ],
+    },
+    "t1"
+  );
+  for (const line of [
+    "More below: 4000px, about 4 screens.",
+    'Paging controls out of view (click one to scroll to it and use it):\n[e44] link "Pairs 201-300" (below)',
+    '[e301] table "Trending": 100 rows x 11 columns, 14 in view; first row: "#1 | TRUMP"',
+    "page_extract reads a table or list whole.",
+  ]) {
+    ok(text.includes(line), `the observation says: ${line}`);
+  }
+  ok(
+    !formatObservation({
+      url: "https://example.com/",
+      title: "",
+      scroll: { y: 0, height: 1100, viewport: 1000 },
+      elements: [],
+      text: "",
+    }).includes("More below"),
+    "a page that is a little taller than the window does not say it"
   );
 });
 

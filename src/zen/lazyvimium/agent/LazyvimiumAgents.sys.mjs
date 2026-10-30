@@ -16,6 +16,7 @@ import {
   LazyvimiumAgentRun,
 } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentHarness.sys.mjs";
 import { LazyvimiumAgentLog } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentLog.sys.mjs";
+import { LazyvimiumNetworkLog } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentNetwork.sys.mjs";
 import { LazyvimiumAgentServer } from "resource:///modules/lazyvimium/agent/LazyvimiumAgentServer.sys.mjs";
 import {
   pageHeight,
@@ -29,6 +30,7 @@ import { LazyvimiumTheme } from "resource:///modules/lazyvimium/ui/LazyvimiumThe
 import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
 export const PREF_DEFAULT_AGENT = "lazyvimium.agent.default";
+export const PREF_NETWORK = "lazyvimium.agent.network";
 // lazyvimium.agent.model.<agent id>: the model each agent runs with.
 export const PREF_MODEL = "lazyvimium.agent.model.";
 
@@ -204,6 +206,7 @@ export class LazyvimiumAgentConversation {
       log,
       opened: this.opened,
       onUi: ui => this.#onUi(ui),
+      network: this.#service.recordNetwork(),
     });
     const token = LazyvimiumAgentServer.open(toolbox);
     this.#starting = true;
@@ -438,6 +441,24 @@ class LazyvimiumAgentService {
     return PathUtils.join(this.workDir, "logs");
   }
 
+  #networkLog = new LazyvimiumNetworkLog();
+
+  /**
+   * Record the requests of the tabs' pages, from the first time an agent
+   * panel opens: from startup it would cost every page the user visits
+   * something for nothing.
+   *
+   * @returns {LazyvimiumNetworkLog|null} Null while the pref is off.
+   */
+  recordNetwork() {
+    if (Services.prefs.getBoolPref(PREF_NETWORK, true)) {
+      this.#networkLog.start();
+      return this.#networkLog;
+    }
+    this.#networkLog.stop();
+    return null;
+  }
+
   /**
    * @param {object} [options]
    * @param {boolean} [options.refresh]
@@ -558,6 +579,7 @@ class LazyvimiumAgentService {
    *   is installed.
    */
   async open(browser) {
+    this.recordNetwork();
     let conversation = this.#conversations.get(browser);
     if (!conversation) {
       const agent = await this.defaultAgent();

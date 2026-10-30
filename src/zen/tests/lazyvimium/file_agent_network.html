@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Pairs</title>
+</head>
+<body>
+  <!-- A table that shows its first two rows of what the request brought. -->
+  <table><tbody id="rows"></tbody></table>
+  <button id="more">More</button>
+  <!-- More rows than the window shows, as a table and as a grid of divs. -->
+  <table id="big" aria-label="Big table">
+    <thead><tr><th>Token</th><th>Price</th></tr></thead>
+    <tbody>
+      <script>
+        for (let i = 1; i <= 12; i++) {
+          document.write(`<tr style="height: 150px"><td><a href="/token/${i}">TOK${i}</a></td><td>$${i}.00</td></tr>`);
+        }
+      </script>
+    </tbody>
+  </table>
+  <div id="grid" aria-label="Grid of pairs">
+    <script>
+      for (let i = 1; i <= 6; i++) {
+        document.write(`<a class="row" href="/pair/${i}" style="display: block"><div><div><span>PAIR${i}</span></div><div>${i * 10}K</div><div>${i}%</div></div></a>`);
+      }
+    </script>
+  </div>
+  <div style="height: 3000px"></div>
+  <a href="#next">Pairs 201-300</a>
+  <script>
+    async function load(page) {
+      const response = await fetch(`file_agent_network_data.json?page=${page}`);
+      const data = await response.json();
+      const rows = document.getElementById("rows");
+      for (const pair of data.pairs.slice(0, 2)) {
+        const row = rows.insertRow();
+        row.insertCell().textContent = pair.symbol;
+      }
+    }
+    load(1);
+    // What an API call with a script's own headers and a POST body look like.
+    fetch(`file_agent_network_data.json?page=3&t=${Date.now()}`, {
+      headers: { "X-Test": "abc123", Authorization: "Bearer sekrit-token" },
+    });
+    fetch("file_agent_network_post.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "{ pairs }" }),
+    });
+    const missing = new XMLHttpRequest();
+    missing.open("GET", "file_agent_network_missing.json");
+    missing.send();
+    document.getElementById("more").addEventListener("click", () => load(2));
+  </script>
+</body>
+</html>

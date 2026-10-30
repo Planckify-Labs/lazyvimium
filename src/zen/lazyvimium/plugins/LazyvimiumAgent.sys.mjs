@@ -59,6 +59,25 @@ export const LazyvimiumAgentSpec = {
       params: { scope: "string?", outline: "boolean?", a11y: "boolean?" },
       agent: false,
     },
+    "agent.extract": {
+      desc: "Read a Table or List for the Agent",
+      where: "content",
+      module: CONTENT,
+      params: { id: "string", offset: "number?", limit: "number?" },
+      agent: false,
+    },
+    "agent.fetch": {
+      desc: "Fetch an Address as the Page for the Agent",
+      where: "content",
+      module: CONTENT,
+      params: {
+        url: "string",
+        method: "string?",
+        headers: "object?",
+        body: "string?",
+      },
+      agent: false,
+    },
     "agent.version": {
       desc: "Ask How Much the Page Has Changed",
       where: "content",

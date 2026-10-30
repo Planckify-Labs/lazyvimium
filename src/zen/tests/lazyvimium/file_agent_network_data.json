@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0",
+  "pairs": [
+    { "symbol": "TRUMP", "liquidity": { "usd": 12000000 } },
+    { "symbol": "PMUP", "liquidity": { "usd": 510000 } },
+    { "symbol": "GF", "liquidity": { "usd": 91000 } },
+    { "symbol": "HIDDENROW", "liquidity": { "usd": 7 } }
+  ]
+}

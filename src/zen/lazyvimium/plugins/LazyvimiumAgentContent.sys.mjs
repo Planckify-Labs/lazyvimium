@@ -56,6 +56,21 @@ const REVEAL_TIMEOUT_MS = 400;
 const SHOW_TEXT = 4; // NodeFilter.SHOW_TEXT
 const MAX_OUTLINE = 60;
 const TREE_TIMEOUT_MS = 300;
+// Tables and lists an observation points out, and how a read of one is cut.
+const MIN_ROWS = 5;
+const MAX_DATA_REGIONS = 6;
+const DATA_BUDGET_MS = 60;
+const IN_VIEW_ROWS_MAX = 400;
+const EXTRACT_ROWS = 100;
+const EXTRACT_MAX_ROWS = 500;
+const EXTRACT_MAX_CHARS = 30000;
+const CELL_MAX = 200;
+const FETCH_MAX_BYTES = 20 * 1024 * 1024;
+const MAX_PAGERS = 8;
+const PAGER_LABEL_MAX = 40;
+// What the controls that page through a list are called.
+const PAGER =
+  /^(next|previous|prev|older|newer|first|last|more|next page|previous page|[<>‹›«»]+)$|\b(next|previous|prev)\s+page\b|\bpage\s+\d+\b|\b(load|show|view|see)\s+more\b|\b\d+\s*[-–]\s*\d+\b/i;
 // Names, roles and states from Gecko's accessibility tree instead of this
 // file's own reading of the DOM. Turning the accessibility engine on costs
 // the process some layout work, so it can be turned off.
@@ -633,7 +648,8 @@ function visibleText(
       length += value.length + 1;
     }
   }
-  return words.join("\n").slice(0, MAX_TEXT);
+  const text = words.join("\n");
+  return { text: text.slice(0, MAX_TEXT), cut: text.length > MAX_TEXT };
 }
 
 // Whether the agent is told about an element, and with which role: one it can
@@ -878,6 +894,7 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
   }
   const root = scope ? resolveRegion(window, scope) : document;
   const elements = [];
+  const pagers = [];
   let omitted = 0;
   const seen = new Set();
   for (const element of controls(root)) {
@@ -887,6 +904,12 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
     seen.add(element);
     const listed = listable(window, element, !!scope);
     if (!listed) {
+      if (!scope && pagers.length < MAX_PAGERS) {
+        const pager = pagerOf(window, page, element);
+        if (pager) {
+          pagers.push(pager);
+        }
+      }
       continue;
     }
     const { role, rect, target } = listed;
@@ -902,14 +925,17 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
       controlItem(window, element, { id, role, rect, target, facts })
     );
   }
+  const read = scope
+    ? visibleText(document, window, root, true)
+    : visibleText(document, window);
   return {
     ...base,
     elements,
     omitted,
     frames: scope ? [] : visibleFrames(window),
-    text: scope
-      ? visibleText(document, window, root, true)
-      : visibleText(document, window),
+    text: read.text,
+    textCut: read.cut,
+    ...(!scope && { data: dataRegions(window, page), pagers }),
     selection: window.getSelection()?.toString().slice(0, 2000) ?? "",
     version: page.version,
     ...(scope && { scope }),
@@ -977,6 +1003,318 @@ function outlineOf(window, page, service) {
   };
   visit(window.document);
   return entries.slice(0, MAX_OUTLINE);
+}
+
+// A control that pages through a list and is out of view, so the agent
+// knows there is more than it reads: "Pairs 201-300" sits under a table of
+// a hundred rows, past the view and past the 250 controls an observation
+// lists. It is given an id like any control, and clicking it scrolls to it.
+function pagerOf(window, page, element) {
+  // The cheap tests first: this runs for every control out of view.
+  const rel = element.getAttribute("rel");
+  const raw =
+    element.getAttribute("aria-label") ||
+    element.textContent ||
+    element.title ||
+    "";
+  if (raw.length > PAGER_LABEL_MAX * 4 && rel != "next" && rel != "prev") {
+    return null;
+  }
+  const label = raw.replace(/\s+/g, " ").trim();
+  const named =
+    !!label.length && label.length <= PAGER_LABEL_MAX && PAGER.test(label);
+  if (!named && rel != "next" && rel != "prev") {
+    return null;
+  }
+  const role = roleOf(element);
+  if (!role || disabled(element) || !pressTarget(element)) {
+    return null;
+  }
+  const id = identity(page, element);
+  page.guards.set(id, guardOf(element));
+  page.kinds.set(id, { role, label: accessibleName(element) });
+  const rect = pressTarget(element).getBoundingClientRect();
+  return {
+    id: `e${id}`,
+    role,
+    label: label || rel,
+    where: rect.top >= window.innerHeight ? "below" : "above",
+  };
+}
+
+// What a cell says, in one line.
+function cellText(element) {
+  return (element.innerText ?? element.textContent ?? "")
+    .replace(/\s*\n\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, CELL_MAX);
+}
+
+function hasOwnText(element) {
+  return [...element.childNodes].some(
+    node => node.nodeType == node.TEXT_NODE && node.textContent.trim()
+  );
+}
+
+const CELLS = [
+  ":scope > td",
+  ":scope > th",
+  ":scope > [role=cell]",
+  ":scope > [role=gridcell]",
+  ":scope > [role=columnheader]",
+  ":scope > [role=rowheader]",
+].join(",");
+
+// The cells of a row: those a table or grid names, else the children of the
+// first level where the row splits in more than one, since div grids wrap
+// their cells in a layer or two.
+function cellsOf(row) {
+  const named = [...row.querySelectorAll(CELLS)];
+  if (named.length) {
+    return named;
+  }
+  let level = row;
+  while (level.children.length == 1 && !hasOwnText(level)) {
+    level = level.firstElementChild;
+  }
+  const parts = [...level.children].filter(
+    child =>
+      !child.matches("script,style,template") &&
+      child.checkVisibility({ checkVisibilityCSS: true })
+  );
+  return parts.length > 1 ? parts : [level];
+}
+
+const TABLES = "table,[role=table],[role=grid],[role=treegrid]";
+
+function signatureOf(element) {
+  return `${element.localName}.${element.classList[0] ?? ""}`;
+}
+
+// The children of an element that repeat: the most common kind among them,
+// if they are most of what it holds.
+function repeatedRows(container) {
+  const groups = new Map();
+  let all = 0;
+  for (const child of container.children) {
+    if (child.matches("script,style,template")) {
+      continue;
+    }
+    all++;
+    const key = signatureOf(child);
+    const group = groups.get(key);
+    if (group) {
+      group.push(child);
+    } else {
+      groups.set(key, [child]);
+    }
+  }
+  let best = [];
+  for (const group of groups.values()) {
+    if (group.length > best.length) {
+      best = group;
+    }
+  }
+  return best.length >= 2 && best.length >= all * 0.6 ? best : [];
+}
+
+// Rows and the header of a table, grid or repeating structure.
+function rowsOf(container) {
+  if (container.matches(TABLES)) {
+    const rows = [...container.querySelectorAll("tr,[role=row]")].filter(
+      row => row.closest(TABLES) == container
+    );
+    const isHeader = row =>
+      row.querySelector(":scope > th, :scope > [role=columnheader]") &&
+      !row.querySelector(
+        ":scope > td, :scope > [role=cell], :scope > [role=gridcell]"
+      );
+    return {
+      header: rows.find(isHeader) ?? null,
+      rows: rows.filter(row => !isHeader(row)),
+    };
+  }
+  const rows = repeatedRows(container);
+  // A header the grid names, kept out of the rows.
+  const header =
+    container.parentElement?.querySelector("[role=columnheader]")
+      ?.parentElement ?? null;
+  return { header: rows.includes(header) ? null : header, rows };
+}
+
+// What to call a table or list: its own name, a caption, or the heading
+// above it.
+function regionLabel(container) {
+  const named =
+    container.getAttribute("aria-label") ||
+    container.querySelector(":scope > caption")?.textContent ||
+    container
+      .closest("section,[role=region],article")
+      ?.querySelector("h1,h2,h3,h4")?.textContent ||
+    "";
+  return named.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+// The tables and lists on the page with more rows than a screen shows: where
+// the data is, so the agent reads all of it rather than what is in view.
+// Found as a person finds them: tables and grids, and parents most of whose
+// children are alike with several cells each (rows are often divs).
+function dataRegions(window, page) {
+  const candidates = [];
+  const deadline = Date.now() + DATA_BUDGET_MS;
+  const consider = container => {
+    if (!visible(container)) {
+      return;
+    }
+    const { rows } = rowsOf(container);
+    if (rows.length < MIN_ROWS) {
+      return;
+    }
+    const sample = rows
+      .slice(0, 3)
+      .map(row => cellsOf(row).length)
+      .sort((a, b) => a - b);
+    const cols = sample[Math.floor(sample.length / 2)];
+    if (cols < 2 && !container.matches(TABLES)) {
+      return;
+    }
+    candidates.push({ container, rows, cols });
+  };
+  for (const table of window.document.querySelectorAll(TABLES)) {
+    consider(table);
+  }
+  // The parents of every fifth child: the elements with enough children,
+  // found in one query rather than by asking each of thousands.
+  const parents = new Set();
+  for (const fifth of window.document.body.querySelectorAll(
+    `:nth-child(${MIN_ROWS})`
+  )) {
+    parents.add(fifth.parentElement);
+  }
+  for (const parent of parents) {
+    if (Date.now() > deadline) {
+      break;
+    }
+    if (
+      parent &&
+      !parent.closest(TABLES) &&
+      !parent.matches("select,datalist,nav,head")
+    ) {
+      consider(parent);
+    }
+  }
+  candidates.sort((a, b) => b.rows.length * b.cols - a.rows.length * a.cols);
+  const regions = [];
+  for (const candidate of candidates) {
+    if (regions.length >= MAX_DATA_REGIONS) {
+      break;
+    }
+    if (
+      regions.some(
+        kept =>
+          kept.container.contains(candidate.container) ||
+          candidate.container.contains(kept.container)
+      )
+    ) {
+      continue;
+    }
+    regions.push(candidate);
+  }
+  return regions.map(({ container, rows, cols }) => {
+    const id = identity(page, container);
+    page.regions.add(id);
+    let inView = 0;
+    for (const row of rows.slice(0, IN_VIEW_ROWS_MAX)) {
+      const rect = row.getBoundingClientRect();
+      if (rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight) {
+        inView++;
+      }
+    }
+    return {
+      id: `e${id}`,
+      kind: container.matches(TABLES) ? "table" : "list",
+      label: regionLabel(container),
+      rows: rows.length,
+      cols,
+      inView,
+      first: cellsOf(rows[0])
+        .map(cellText)
+        .filter(Boolean)
+        .join(" | ")
+        .slice(0, 100),
+    };
+  });
+}
+
+/**
+ * Every row of a table or list, in view or not, as tab-separated lines with
+ * the header first: what a page shows a screenful of at a time.
+ *
+ * @param {Window} window
+ * @param {object} args
+ * @param {string} args.id A data region's id from an observation.
+ * @param {number} [args.offset] The row to start at.
+ * @param {number} [args.limit] How many rows at most.
+ * @returns {object} {text, total, from, to}
+ */
+export function extract(window, { id, offset = 0, limit } = {}) {
+  let container = resolveRegion(window, id);
+  let { header, rows } = rowsOf(container);
+  if (rows.length < 2) {
+    // A region of the outline that holds the table, not the table.
+    const inside = container.querySelector(TABLES);
+    if (inside) {
+      container = inside;
+      ({ header, rows } = rowsOf(container));
+    }
+  }
+  if (!rows.length) {
+    throw new LazyvimiumStalePage(
+      `${id} has no rows to read. Use an id from the "Data on the page" lines of an observation.`
+    );
+  }
+  const from = Math.max(0, Math.min(rows.length, Number(offset) || 0));
+  const to = Math.min(
+    rows.length,
+    from + Math.min(EXTRACT_MAX_ROWS, Number(limit) || EXTRACT_ROWS)
+  );
+  const origin = window.location.origin;
+  const linkOf = row => {
+    const anchor = row.localName == "a" ? row : row.querySelector("a[href]");
+    if (!anchor?.href) {
+      return "";
+    }
+    return anchor.href.startsWith(origin)
+      ? anchor.href.slice(origin.length)
+      : anchor.href;
+  };
+  const lines = [];
+  let chars = 0;
+  let last = from;
+  const links = rows.slice(from, to).map(linkOf);
+  const withLinks = links.filter(Boolean).length > (to - from) / 2;
+  if (header) {
+    lines.push(
+      [...cellsOf(header).map(cellText), ...(withLinks ? ["link"] : [])].join(
+        "\t"
+      )
+    );
+  }
+  for (let i = from; i < to; i++) {
+    const cells = cellsOf(rows[i]).map(cellText);
+    if (withLinks) {
+      cells.push(links[i - from]);
+    }
+    const line = cells.join("\t");
+    if (chars + line.length > EXTRACT_MAX_CHARS && i > from) {
+      break;
+    }
+    chars += line.length + 1;
+    lines.push(line);
+    last = i + 1;
+  }
+  return { text: lines.join("\n"), total: rows.length, from, to: last };
 }
 
 // A region an outline listed, as a scope: present and showing, but without
@@ -1459,6 +1797,62 @@ export const actions = {
   "agent.observe": async ({ window }, args) => {
     try {
       return await observe(window, args);
+    } catch (e) {
+      if (e instanceof LazyvimiumStalePage) {
+        return { error: e.message };
+      }
+      throw e;
+    }
+  },
+  // A request made as the page: its origin, its cookies, its CORS rules, so
+  // what a page's own script could ask for and nothing more. The network
+  // log records the response; this only says how it went.
+  "agent.fetch": async (
+    { window },
+    { url, method = "GET", headers = {}, body = null }
+  ) => {
+    const started = Date.now();
+    const send = credentials =>
+      window.fetch(url, {
+        method,
+        credentials,
+        headers: { Accept: "application/json, text/plain, */*", ...headers },
+        ...(body !== null && { body }),
+      });
+    try {
+      // With cookies for another site first, which only works if that site
+      // allows credentials; one that answers "*" refuses them, so ask again
+      // as the page's own scripts do by default. Only a read is asked twice:
+      // a request that changes something is sent once.
+      const safe = method == "GET" || method == "HEAD";
+      const response = await send("include").catch(e => {
+        if (!safe) {
+          throw e;
+        }
+        return send("same-origin");
+      });
+      const length = Number(response.headers.get("content-length")) || 0;
+      if (length > FETCH_MAX_BYTES) {
+        response.body?.cancel();
+        return {
+          error: `That response is ${length} bytes, more than the ${FETCH_MAX_BYTES} that can be read.`,
+        };
+      }
+      await response.text();
+      return {
+        status: response.status,
+        mime: response.headers.get("content-type") ?? "",
+        ms: Date.now() - started,
+      };
+    } catch (e) {
+      return {
+        error: `The page could not fetch it: ${e.message}. A request to another site that does not allow this page's origin fails; page_navigate opens it in a tab instead.`,
+      };
+    }
+  },
+  "agent.extract": ({ window }, args) => {
+    try {
+      return extract(window, args);
     } catch (e) {
       if (e instanceof LazyvimiumStalePage) {
         return { error: e.message };
