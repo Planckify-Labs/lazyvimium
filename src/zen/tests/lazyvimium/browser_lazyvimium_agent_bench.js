@@ -98,6 +98,22 @@ add_task(async function bench_a11y_off_and_on() {
     return first.value.text;
   }
 
+  // What an action costs, observation after it included: a button that
+  // starts no navigation, as most clicks in a form are.
+  const page = await box.callTool("page_observe", {});
+  const add = page.text.match(/\[(e\d+)\] button "Add to cart"/)[1];
+  const clicks = [];
+  for (let i = 0; i < RUNS; i++) {
+    clicks.push(
+      (
+        await timed(() =>
+          box.callTool("page_act", { action: "click", element: add })
+        )
+      ).ms
+    );
+  }
+  report("click", { medianMs: Math.round(median(clicks)) });
+
   report("memory before", { residentMB: await processMemory(browser) });
   await SpecialPowers.pushPrefEnv({ set: [["lazyvimium.agent.a11y", false]] });
   const off = await measure("a11y off");

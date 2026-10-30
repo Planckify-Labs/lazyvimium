@@ -19,6 +19,8 @@ const LOAD_TIMEOUT_MS = 15000;
 const RETRY_MS = 100;
 // How long a click takes to start the navigation it causes, if it does.
 const NAVIGATION_START_MS = 250;
+const NAVIGATION_POLL_MS = 25;
+const NAVIGATION_COMMIT_MS = 3000;
 // Frames read per observation, and how deep: ads and trackers can nest
 // dozens, and each one costs a round trip to its process.
 const MAX_FRAMES = 12;
@@ -213,6 +215,9 @@ function elementLines(page, prefix = "") {
         line += ` ${flag}`;
       }
     }
+    if (element.error) {
+      line += ` error=${quote(element.error)}`;
+    }
     if (element.editable) {
       line += " (editable)";
     }
@@ -221,6 +226,9 @@ function elementLines(page, prefix = "") {
     }
     if (element.options) {
       line += ` options: ${element.options.map(quote).join(", ")}`;
+      if (element.moreOptions) {
+        line += ` and ${element.moreOptions} more (select takes any option's text)`;
+      }
     }
     lines.push(line);
   }
@@ -969,8 +977,25 @@ export class LazyvimiumAgentToolbox {
   // Wait for a navigation an action started, so the agent gets the page it
   // led to rather than the one it left. In dev testing, links answered with
   // the old page made the agent click them again.
+  // A page that says it is navigating will replace its document: wait for
+  // that, since the load flag the parent sees can come and go before then.
+  // A navigation that ends in a download or nothing gives up after a while.
+  async #waitForNewDocument(browser, before) {
+    const deadline = Date.now() + NAVIGATION_COMMIT_MS;
+    while (
+      browser.browsingContext.currentWindowGlobal == before &&
+      Date.now() < deadline
+    ) {
+      await sleep(NAVIGATION_POLL_MS);
+    }
+  }
+
   async #settleNavigation(browser) {
-    await sleep(NAVIGATION_START_MS);
+    // The load shows in the parent a moment after the page starts it.
+    const start = Date.now() + NAVIGATION_START_MS;
+    while (!browser.webProgress?.isLoadingDocument && Date.now() < start) {
+      await sleep(NAVIGATION_POLL_MS);
+    }
     const deadline = Date.now() + LOAD_TIMEOUT_MS;
     while (browser.webProgress?.isLoadingDocument && Date.now() < deadline) {
       await sleep(RETRY_MS);
@@ -1023,6 +1048,7 @@ export class LazyvimiumAgentToolbox {
       .join(" ");
     return this.#onTab(tab, title, async browser => {
       let result;
+      const before = browser.browsingContext.currentWindowGlobal;
       const inFrame = parseElementId(element);
       const actor = inFrame && this.#frameActor(browser, inFrame.frame);
       if (inFrame && !actor) {
@@ -1038,10 +1064,24 @@ export class LazyvimiumAgentToolbox {
             : this.#runContent(browser, "agent.act", local));
         } catch {
           // The page went away mid-action: a click that navigated.
-          result = { ok: true, done: `Did ${action}; the page navigated` };
+          result = {
+            ok: true,
+            done: `Did ${action}; the page navigated`,
+            navigated: "document",
+            changed: true,
+          };
         }
       }
-      if (result.ok && (action == "click" || action == "press")) {
+      // Wait for a new page only when the action started one. Waiting after
+      // every click cost each a quarter second; jev waits two frames.
+      if (result.ok && result.navigated == "document" && !inFrame) {
+        await this.#waitForNewDocument(browser, before);
+      }
+      if (
+        result.ok &&
+        (result.navigated == "document" ||
+          browser.webProgress?.isLoadingDocument)
+      ) {
         await this.#settleNavigation(browser);
       }
       const observation = await this.#observeText(browser);
@@ -1052,9 +1092,15 @@ export class LazyvimiumAgentToolbox {
           isError: true,
         };
       }
+      // jev stops a run after three actions that change nothing; the agent
+      // here is told, so it does not repeat one.
+      const unchanged =
+        result.changed === false && action != "scroll"
+          ? " Nothing on the page changed. If it is still working, page_wait; otherwise do something else rather than repeat this."
+          : "";
       return {
         title: tab ? `${result.done} on ${tab}` : result.done,
-        text: `${result.done}.\n\n${observation}`,
+        text: `${result.done}.${unchanged}\n\n${observation}`,
       };
     });
   }

@@ -10,7 +10,10 @@
 // was observed, then that nothing covers it.
 
 import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
-import { actions as scrollActions } from "resource:///modules/lazyvimium/plugins/LazyvimiumScrollContent.sys.mjs";
+import {
+  actions as scrollActions,
+  scrollTarget,
+} from "resource:///modules/lazyvimium/plugins/LazyvimiumScrollContent.sys.mjs";
 
 const ROLES = [
   "button",
@@ -208,6 +211,77 @@ const KEYS = {
   " ": { code: "Space", keyCode: 32 },
 };
 
+// The names agents give keys, which are not always the DOM's: in dev testing
+// they sent "Space" and "Shift+Tab" and were told the key did not exist.
+const KEY_ALIASES = {
+  space: " ",
+  spacebar: " ",
+  esc: "Escape",
+  return: "Enter",
+  del: "Delete",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  pgup: "PageUp",
+  pgdn: "PageDown",
+  pagedown: "PageDown",
+  pageup: "PageUp",
+};
+
+const MODIFIER_KEYS = {
+  shift: { key: "Shift", code: "ShiftLeft", keyCode: 16, flag: "shiftKey" },
+  control: {
+    key: "Control",
+    code: "ControlLeft",
+    keyCode: 17,
+    flag: "ctrlKey",
+  },
+  ctrl: { key: "Control", code: "ControlLeft", keyCode: 17, flag: "ctrlKey" },
+  alt: { key: "Alt", code: "AltLeft", keyCode: 18, flag: "altKey" },
+  option: { key: "Alt", code: "AltLeft", keyCode: 18, flag: "altKey" },
+  meta: { key: "Meta", code: "MetaLeft", keyCode: 91, flag: "metaKey" },
+  cmd: { key: "Meta", code: "MetaLeft", keyCode: 91, flag: "metaKey" },
+};
+
+/**
+ * A key as an agent names it, such as "Enter", "Space", "Shift+Tab" or
+ * "Control+a": the key and the modifiers held with it.
+ *
+ * @param {string} text
+ * @returns {{key: string, info: {code: string, keyCode: number}, modifiers: object[]}|null}
+ */
+export function parseKey(text) {
+  const parts = text.length > 1 ? text.split("+") : [text];
+  // "Control++" holds Control and presses +.
+  if (parts.length > 1 && parts.at(-1) == "" && parts.at(-2) == "") {
+    parts.splice(-2, 2, "+");
+  }
+  const name = parts.pop();
+  const modifiers = [];
+  for (const part of parts) {
+    const modifier = MODIFIER_KEYS[part.trim().toLowerCase()];
+    if (!modifier) {
+      return null;
+    }
+    modifiers.push(modifier);
+  }
+  let key = KEY_ALIASES[name.toLowerCase()] ?? name;
+  key =
+    Object.keys(KEYS).find(k => k.toLowerCase() == key.toLowerCase()) ?? key;
+  if (KEYS[key]) {
+    return { key, info: KEYS[key], modifiers };
+  }
+  if ([...key].length != 1) {
+    return null;
+  }
+  // Letters and digits carry their key code, which shortcuts such as
+  // Control+A read.
+  const upper = key.toUpperCase();
+  const keyCode = /^[A-Z0-9]$/.test(upper) ? upper.charCodeAt(0) : 0;
+  return { key, info: { code: "", keyCode }, modifiers };
+}
+
 export class LazyvimiumStalePage extends Error {
   /**
    * @param {string} message
@@ -273,14 +347,9 @@ function watch(window, page) {
     attributes: true,
     characterData: true,
   });
-  for (const type of [
-    "input",
-    "change",
-    "scroll",
-    "resize",
-    "focusin",
-    "load",
-  ]) {
+  // Not focus: clicking a button that does nothing focuses it, and that
+  // would read as the page answering.
+  for (const type of ["input", "change", "scroll", "resize", "load"]) {
     window.addEventListener(type, bump, { capture: true, passive: true });
   }
 }
@@ -404,6 +473,16 @@ function isEditable(element, role) {
 }
 
 function fieldValue(element, role) {
+  // A checkbox's or button's value is what the form sends ("on"), not
+  // anything a person sees; their state says the rest.
+  if (
+    ["checkbox", "radio", "switch", "button"].includes(role) ||
+    ["checkbox", "radio", "submit", "reset", "button", "image"].includes(
+      element.type
+    )
+  ) {
+    return null;
+  }
   if ("value" in element && element.localName != "button") {
     return String(element.value ?? "");
   }
@@ -555,13 +634,16 @@ function listable(window, element, everywhere) {
   const type = (element.getAttribute("type") || "").toLowerCase();
   if (
     (element.localName == "input" && UNSAFE_TYPES.has(type)) ||
-    !visible(element) ||
     disabled(element)
   ) {
     return null;
   }
+  const target = pressTarget(element);
+  if (!target) {
+    return null;
+  }
   const role = roleOf(element);
-  const rect = element.getBoundingClientRect();
+  const rect = target.getBoundingClientRect();
   const shown = everywhere
     ? rect.width > 0 && rect.height > 0
     : inViewport(rect, window);
@@ -571,17 +653,124 @@ function listable(window, element, everywhere) {
   if (role == "gridcell" && element.querySelector('button,[role="button"]')) {
     return null;
   }
-  return { role, rect };
+  return { role, rect, target };
+}
+
+// What to press for an element: itself, or for a checkbox or radio the
+// page hides behind a styled label, as most design systems do, that label.
+// jev and the first port left those out, so "I agree" boxes could not be
+// ticked.
+function pressTarget(element) {
+  if (visible(element)) {
+    return element;
+  }
+  if (
+    element.localName == "input" &&
+    ["checkbox", "radio"].includes(element.type) &&
+    !element.closest('[aria-hidden="true"],[inert]')
+  ) {
+    return (
+      [...(element.labels ?? [])].find(label => {
+        const rect = label.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && visible(label);
+      }) ?? null
+    );
+  }
+  return null;
+}
+
+const LABEL_MAX = 80;
+
+function textOf(node) {
+  const text =
+    node.nodeType == node.TEXT_NODE ? node.textContent : node.innerText;
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+// The text a person reads as a field's label when the markup does not tie
+// one to it: the cell before it in a table row, else the text just before
+// it (just after, for a checkbox or radio). Another control in between
+// means the text belongs to that one. In dev testing a sign-up form laid out
+// as a table showed thirty fields all named "textbox", and the agent filled
+// them by counting.
+function nearbyLabel(element) {
+  const after = ["checkbox", "radio"].includes(element.type);
+  const cell = element.closest("td,th,[role='cell'],[role='gridcell']");
+  if (cell && !after) {
+    for (let prev = cell.previousElementSibling; prev; ) {
+      if (prev.querySelector(SELECTOR)) {
+        break;
+      }
+      const text = textOf(prev);
+      if (text) {
+        return text.length <= LABEL_MAX ? text : "";
+      }
+      prev = prev.previousElementSibling;
+    }
+  }
+  let node = element;
+  for (let depth = 0; node && depth < 3; depth++) {
+    for (
+      let sibling = after ? node.nextSibling : node.previousSibling;
+      sibling;
+      sibling = after ? sibling.nextSibling : sibling.previousSibling
+    ) {
+      if (
+        sibling.nodeType == sibling.ELEMENT_NODE &&
+        (sibling.matches(SELECTOR) || sibling.querySelector(SELECTOR))
+      ) {
+        return "";
+      }
+      if (
+        sibling.nodeType != sibling.TEXT_NODE &&
+        sibling.nodeType != sibling.ELEMENT_NODE
+      ) {
+        continue;
+      }
+      const text = textOf(sibling);
+      if (text) {
+        return text.length <= LABEL_MAX ? text : "";
+      }
+    }
+    node = node.parentElement;
+    if (!node || node.matches("form,body,[role='form'],fieldset")) {
+      break;
+    }
+  }
+  return "";
+}
+
+// What a form field needs and what the page refused, from the markup too,
+// so forms say it without the accessibility tree.
+function addFormState(element, facts, item) {
+  if (
+    !facts &&
+    (element.required || element.getAttribute("aria-required") == "true")
+  ) {
+    item.required = true;
+  }
+  // What the page refused, after the agent typed or submitted: the reason a
+  // form will not go through.
+  if (
+    element.matches(":user-invalid") ||
+    (!facts && element.getAttribute("aria-invalid") == "true")
+  ) {
+    item.invalid = true;
+    if (element.validationMessage) {
+      item.error = element.validationMessage.slice(0, 120);
+    }
+  }
 }
 
 // One control as the agent reads it: what it is called and says, and the
 // state it is in. The accessibility tree answers where it has an accessible,
 // the markup where it does not.
-function controlItem(window, element, { id, role, rect, facts }) {
+function controlItem(window, element, { id, role, rect, target, facts }) {
   const item = {
     id: `e${id}`,
     role,
-    label: facts?.name || accessibleName(element) || role,
+    label:
+      facts?.name || accessibleName(element) || nearbyLabel(element) || role,
   };
   if (facts?.description) {
     item.description = facts.description;
@@ -591,14 +780,13 @@ function controlItem(window, element, { id, role, rect, facts }) {
       item[flag] = true;
     }
   }
+  addFormState(element, facts, item);
   if (isEditable(element, role)) {
     item.editable = true;
   }
   // Said up front, so the agent does not click what a panel covers: in
   // dev testing it tried YouTube Music's Play under the player three times.
-  const cover = inViewport(rect, window)
-    ? coverOf(window, element, rect)
-    : null;
+  const cover = inViewport(rect, window) ? coverOf(window, target, rect) : null;
   if (cover) {
     item.covered = describe(cover).slice(0, 80);
   }
@@ -620,10 +808,13 @@ function controlItem(window, element, { id, role, rect, facts }) {
   }
   if (element.localName == "select") {
     item.value = [...element.selectedOptions].map(o => o.label).join(", ");
-    item.options = [...element.options]
-      .filter(o => !o.disabled)
-      .slice(0, MAX_OPTIONS)
-      .map(o => o.label);
+    const options = [...element.options].filter(o => !o.disabled);
+    item.options = options.slice(0, MAX_OPTIONS).map(o => o.label);
+    // A year or country list runs past what is shown; select still takes
+    // any of them by its text.
+    if (options.length > MAX_OPTIONS) {
+      item.moreOptions = options.length - MAX_OPTIONS;
+    }
   }
   return item;
 }
@@ -650,11 +841,7 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
   if (service && document.body) {
     treeBuilt = await treeReady(window, service);
   }
-  const scroll = {
-    y: Math.round(window.scrollY),
-    height: document.documentElement?.scrollHeight ?? 0,
-    viewport: window.innerHeight,
-  };
+  const scroll = scrollState(window);
   const base = {
     url: document.URL,
     title: document.title,
@@ -694,7 +881,7 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
     if (!listed) {
       continue;
     }
-    const { role, rect } = listed;
+    const { role, rect, target } = listed;
     if (elements.length >= MAX_ELEMENTS) {
       omitted++;
       continue;
@@ -703,7 +890,9 @@ export async function observe(window, { scope, outline = false, a11y } = {}) {
     page.guards.set(id, guardOf(element));
     page.kinds.set(id, { role, label: accessibleName(element) });
     const facts = service && treeBuilt ? a11yFacts(service, element) : null;
-    elements.push(controlItem(window, element, { id, role, rect, facts }));
+    elements.push(
+      controlItem(window, element, { id, role, rect, target, facts })
+    );
   }
   return {
     ...base,
@@ -859,7 +1048,7 @@ function resolveElement(window, elementId) {
       `${elementId} is disabled now. Observe again.`
     );
   }
-  if (!visible(element)) {
+  if (!pressTarget(element)) {
     const error = new LazyvimiumStalePage(
       `${elementId} is hidden now, even with the mouse over it. Observe again.`,
       { hidden: true }
@@ -956,7 +1145,7 @@ function hitPoint(window, element) {
 
 // Trusted mouse input through the page's presshell, as a user's would be.
 function click(window, element) {
-  const { x, y } = hitPoint(window, element);
+  const { x, y } = hitPoint(window, pressTarget(element) ?? element);
   window.synthesizeMouseEvent("mousemove", x, y, {});
   for (const type of ["mousedown", "mouseup"]) {
     window.synthesizeMouseEvent(type, x, y, { button: 0, clickCount: 1 });
@@ -978,15 +1167,39 @@ function fill(window, element, text) {
   }
 }
 
+// The option an agent means: its exact text or value, else the same text
+// ignoring case and spacing, else the one option whose text contains it.
+// Agents write "Visa" for "Visa (Preferred)" and "usa" for "USA".
+function optionFor(element, choice) {
+  const options = [...element.options].filter(
+    o => !o.disabled && !o.closest("optgroup[disabled]")
+  );
+  const exact = options.find(o => o.value === choice || o.label === choice);
+  if (exact) {
+    return exact;
+  }
+  const norm = text => text.replace(/\s+/g, " ").trim().toLowerCase();
+  const wanted = norm(choice);
+  if (!wanted) {
+    return null;
+  }
+  const same = options.find(
+    o => norm(o.label) == wanted || norm(o.value) == wanted
+  );
+  if (same) {
+    return same;
+  }
+  const containing = options.filter(o => norm(o.label).includes(wanted));
+  return containing.length == 1 ? containing[0] : null;
+}
+
 function select(window, element, choice) {
   if (element.localName != "select") {
     throw new Error(
       `${describe(element)} is not a native list; click it and then its option`
     );
   }
-  const option = [...element.options].find(
-    o => !o.disabled && (o.value === choice || o.label === choice)
-  );
+  const option = optionFor(element, choice);
   if (!option) {
     throw new Error(`${describe(element)} has no option "${choice}"`);
   }
@@ -1000,11 +1213,14 @@ function select(window, element, choice) {
 // A trusted key press through a text input processor, the way EventUtils
 // types. That needs the page focused; in a tab the user is not looking at,
 // the page gets the events untrusted, and Enter in a form field submits.
-function press(window, key) {
-  const info = KEYS[key] ?? (key.length == 1 ? { code: "", keyCode: 0 } : null);
-  if (!info) {
-    throw new Error(`Unknown key "${key}"`);
+function press(window, text) {
+  const parsed = parseKey(text);
+  if (!parsed) {
+    throw new Error(
+      `Unknown key "${text}". Use a key such as Enter, Escape, Tab, Space, ArrowDown or a character, with modifiers like Shift+Tab or Control+a.`
+    );
   }
+  const { key, info, modifiers } = parsed;
   let pressed = false;
   try {
     const tip = Cc["@mozilla.org/text-input-processor;1"].createInstance(
@@ -1014,10 +1230,22 @@ function press(window, key) {
     // one in a content process also goes through the parent, and the page
     // got every key twice.
     if (tip.beginInputTransactionForTests(window, () => true)) {
+      // Modifiers go down first and hold until the key comes up, as a
+      // person's fingers do; the processor keeps their state.
+      const held = modifiers.map(
+        ({ key: name, code, keyCode }) =>
+          new window.KeyboardEvent("", { key: name, code, keyCode })
+      );
+      for (const modifier of held) {
+        tip.keydown(modifier);
+      }
       const event = new window.KeyboardEvent("", { key, ...info });
       tip.keydown(event);
       pressed = true;
       tip.keyup(event);
+      for (const modifier of held.reverse()) {
+        tip.keyup(modifier);
+      }
     }
   } catch {
     // Not focused: fall through, unless the key already went down.
@@ -1033,12 +1261,41 @@ function press(window, key) {
     bubbles: true,
     cancelable: true,
   };
+  for (const modifier of modifiers) {
+    init[modifier.flag] = true;
+  }
   const down = new window.KeyboardEvent("keydown", init);
   const proceed = target.dispatchEvent(down);
   target.dispatchEvent(new window.KeyboardEvent("keyup", init));
-  if (proceed && key == "Enter" && target.form && target.localName == "input") {
+  if (
+    proceed &&
+    key == "Enter" &&
+    !modifiers.length &&
+    target.form &&
+    target.localName == "input"
+  ) {
     target.form.requestSubmit();
   }
+}
+
+// Where the page scrolls: the box a scroll would move, which on app-like
+// pages is a panel rather than the document. Reading the window there said
+// "0 of 0px" on pages with plenty below, and the agent could not tell.
+function scrollState(window) {
+  const document = window.document;
+  const target = document.body ? scrollTarget(document, true) : null;
+  if (!target || target == document.scrollingElement) {
+    return {
+      y: Math.round(window.scrollY),
+      height: document.documentElement?.scrollHeight ?? 0,
+      viewport: window.innerHeight,
+    };
+  }
+  return {
+    y: Math.round(target.scrollTop),
+    height: target.scrollHeight,
+    viewport: target.clientHeight,
+  };
 }
 
 // Let the page answer: two frames, or for a combobox the suggestions it
@@ -1056,8 +1313,20 @@ function settle(window, element, autocomplete) {
       if (stopped) {
         return;
       }
+      // The suggestions of this field, as jev scopes them: another list on
+      // the page that already shows options says nothing about this one.
+      const ids = (
+        element?.getAttribute("aria-controls") ||
+        element?.getAttribute("aria-owns") ||
+        ""
+      )
+        .split(/\s+/)
+        .filter(Boolean);
+      const roots = ids.length
+        ? ids.map(id => window.document.getElementById(id)).filter(Boolean)
+        : [window.document];
       const options = autocomplete
-        ? [...window.document.querySelectorAll('[role="option"]')]
+        ? roots.flatMap(root => [...root.querySelectorAll('[role="option"]')])
         : [];
       if (
         ++frames >= 2 &&
@@ -1081,9 +1350,39 @@ function settle(window, element, autocomplete) {
  * @param {string} [args.element] An id from observe().
  * @param {string} [args.text] For fill: the text; for select: the option;
  *   for press: the key; for scroll: "up" or "down".
- * @returns {Promise<string>} What was done.
+ * @returns {Promise<{done: string, navigated: string|null, changed: boolean}>}
+ *   What was done, whether it started a navigation ("document" or
+ *   "same-document") and whether anything on the page changed.
  */
-export async function act(window, { action, element: elementId, text }) {
+export async function act(window, args) {
+  const document = window.document;
+  const page = document.body ? pageOf(document) : null;
+  if (page) {
+    watch(window, page);
+  }
+  const before = page?.version;
+  // Whether the action started a navigation, as the page itself reports it,
+  // so the caller waits for a new page only when one is coming instead of
+  // a fixed quarter second after every click.
+  let navigated = null;
+  const onNavigate = event => {
+    navigated = event.destination?.sameDocument ? "same-document" : "document";
+  };
+  const navigation = window.navigation;
+  navigation?.addEventListener("navigate", onNavigate);
+  try {
+    const done = await perform(window, args);
+    return {
+      done,
+      navigated,
+      changed: navigated !== null || page?.version !== before,
+    };
+  } finally {
+    navigation?.removeEventListener("navigate", onNavigate);
+  }
+}
+
+async function perform(window, { action, element: elementId, text }) {
   const document = window.document;
   switch (action) {
     case "scroll": {
@@ -1094,11 +1393,17 @@ export async function act(window, { action, element: elementId, text }) {
         return `Scrolled ${describe(element)} into view`;
       }
       const up = text == "up";
+      const from = scrollState(window).y;
       scrollActions[up ? "scroll.pageUp" : "scroll.pageDown"](
         { document, opts: { smooth: false } },
         { count: 1 }
       );
       await settle(window, null, false);
+      // Said plainly, so the agent stops: in dev testing it scrolled a
+      // finished page down and up again for minutes.
+      if (scrollState(window).y == from) {
+        return `Did not scroll: already at the ${up ? "top" : "bottom"}`;
+      }
       return `Scrolled ${up ? "up" : "down"}`;
     }
     case "press": {
@@ -1166,7 +1471,7 @@ export const actions = {
   },
   "agent.act": async ({ window }, args) => {
     try {
-      return { ok: true, done: await act(window, args) };
+      return { ok: true, ...(await act(window, args)) };
     } catch (e) {
       // Errors cross the actor boundary as plain text.
       return {

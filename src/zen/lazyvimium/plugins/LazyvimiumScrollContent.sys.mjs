@@ -44,7 +44,7 @@ function largestScrollable(document, vertical) {
   return best;
 }
 
-function scrollTarget(document, vertical) {
+export function scrollTarget(document, vertical) {
   let element = LazyvimiumDom.deepActiveElement(document);
   while (element && element != document.body) {
     if (canScroll(element, vertical)) {

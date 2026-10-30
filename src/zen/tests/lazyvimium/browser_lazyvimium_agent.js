@@ -990,7 +990,7 @@ add_task(async function test_the_accessibility_tree_names_and_states() {
   // Off by default: the markup alone, as before.
   let { text } = await box.callTool("page_observe", {});
   ok(!text.includes("description="), "the markup alone gives no description");
-  ok(!text.includes(" required"), "or required");
+  ok(!text.includes("pressed="), "or pressed");
   ok(text.includes('textbox "Email"'), "but still the controls");
 
   await SpecialPowers.pushPrefEnv({ set: [["lazyvimium.agent.a11y", true]] });
@@ -1170,5 +1170,227 @@ add_task(async function test_controls_without_names_do_not_break_observing() {
   });
   ok(!result.isError, result.text);
   Assert.equal(await content(browser, "#named", "value"), "ada");
+  BrowserTestUtils.removeTab(tab);
+});
+
+const FORM = `<!doctype html><title>Sign up</title>
+<style>
+  .box input { opacity: 0; position: absolute; }
+  .box span { display: inline-block; width: 16px; height: 16px; border: 1px solid; }
+</style>
+<body style="margin: 20px">
+  <form id="form" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'sent'">
+    <table>
+      <tr><td>First Name</td><td><input id="first"></td></tr>
+      <tr><td>Last Name</td><td><input id="last"></td></tr>
+      <tr><td>Year</td><td><select id="year"></select></td></tr>
+      <tr><td>Card</td><td><select id="card">
+        <option>(Select)</option><option>Visa (Preferred)</option><option>Master Card</option>
+      </select></td></tr>
+    </table>
+    City: <input id="city">
+    <p><input type="checkbox" id="news"> Send me news</p>
+    <label class="box" for="terms"><input type="checkbox" id="terms"><span></span> I agree to the terms</label>
+    <p>Email <input id="email" type="email" required></p>
+    <button id="send">Create account</button>
+    <button type="button" id="noop">Does nothing</button>
+  </form>
+  <p id="out">idle</p>
+  <script>
+    const year = document.getElementById("year");
+    for (let y = 1920; y <= 2020; y++) year.append(new Option(String(y)));
+  </script>
+</body>`;
+
+async function openForm() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "data:text/html," + encodeURIComponent(FORM)
+  );
+  registerCleanupFunction(() => {
+    if (gBrowser.tabs.includes(tab)) {
+      BrowserTestUtils.removeTab(tab);
+    }
+  });
+  return tab;
+}
+
+// From dev testing on a form laid out as a table: thirty fields named
+// "textbox", filled by counting.
+add_task(async function test_fields_are_named_by_the_text_beside_them() {
+  const tab = await openForm();
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  ok(/\[e\d+\] textbox "First Name"/.test(text), text);
+  ok(/\[e\d+\] textbox "Last Name"/.test(text), "the next row's own label");
+  ok(/\[e\d+\] combobox "Year"/.test(text), "a list in a table");
+  ok(/\[e\d+\] textbox "City:"/.test(text), "text just before a field");
+  ok(/\[e\d+\] checkbox "Send me news"/.test(text), "text just after a box");
+  ok(/\[e\d+\] textbox "Email" value="" required/.test(text), "required");
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_a_box_hidden_behind_its_label_can_be_ticked() {
+  const tab = await openForm();
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  const terms = idOf(text, 'checkbox "I agree to the terms" checked=false');
+  const result = await box.callTool("page_act", {
+    action: "click",
+    element: terms,
+  });
+  ok(!result.isError, result.text);
+  ok(await content(browser, "#terms", "checked"), "ticked through its label");
+  ok(
+    result.text.includes('checkbox "I agree to the terms" checked=true'),
+    "and the page after says so"
+  );
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_long_lists_say_so_and_select_forgives() {
+  const tab = await openForm();
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  ok(
+    text.includes("and 71 more (select takes any option's text)"),
+    "a list longer than shown says how much longer"
+  );
+  let result = await box.callTool("page_act", {
+    action: "select",
+    element: idOf(text, 'combobox "Year"'),
+    text: "1990",
+  });
+  ok(!result.isError, result.text);
+  Assert.equal(await content(browser, "#year", "value"), "1990");
+  result = await box.callTool("page_act", {
+    action: "select",
+    element: idOf(result.text, 'combobox "Card"'),
+    text: "visa",
+  });
+  ok(!result.isError, result.text);
+  Assert.equal(await content(browser, "#card", "value"), "Visa (Preferred)");
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_keys_by_the_names_agents_use() {
+  const tab = await openForm();
+  const browser = tab.linkedBrowser;
+  browser.focus();
+  await SpecialPowers.spawn(browser, [], () => content.focus());
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  const news = idOf(text, 'checkbox "Send me news"');
+  let result = await box.callTool("page_act", {
+    action: "press",
+    element: news,
+    text: "Space",
+  });
+  ok(!result.isError, result.text);
+  ok(await content(browser, "#news", "checked"), "Space ticks a box");
+
+  result = await box.callTool("page_act", {
+    action: "press",
+    text: "Shift+Tab",
+  });
+  ok(!result.isError, result.text);
+  Assert.equal(
+    await SpecialPowers.spawn(
+      browser,
+      [],
+      () => content.document.activeElement.id
+    ),
+    "city",
+    "Shift+Tab goes back a field"
+  );
+
+  await box.callTool("page_act", {
+    action: "fill",
+    element: idOf(result.text, 'textbox "City:"'),
+    text: "Springfield",
+  });
+  result = await box.callTool("page_act", {
+    action: "press",
+    text: "Control+a",
+  });
+  ok(!result.isError, result.text);
+  Assert.deepEqual(
+    await SpecialPowers.spawn(browser, [], () => {
+      const city = content.document.getElementById("city");
+      return [city.selectionStart, city.selectionEnd];
+    }),
+    [0, "Springfield".length],
+    "Control+a selects the field's text"
+  );
+  const unknown = await box.callTool("page_act", {
+    action: "press",
+    text: "Hyper+Q",
+  });
+  ok(
+    unknown.isError && unknown.text.includes("Shift+Tab"),
+    "unknown keys say what works"
+  );
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_actions_say_when_nothing_changed() {
+  const tab = await openForm();
+  const browser = tab.linkedBrowser;
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  const result = await box.callTool("page_act", {
+    action: "click",
+    element: idOf(text, 'button "Does nothing"'),
+  });
+  ok(!result.isError, result.text);
+  ok(result.text.includes("Nothing on the page changed."), result.text);
+
+  // The browser refuses an invalid email; the field says why.
+  let after = await box.callTool("page_act", {
+    action: "fill",
+    element: idOf(result.text, 'textbox "Email"'),
+    text: "not-an-email",
+  });
+  after = await box.callTool("page_act", {
+    action: "click",
+    element: idOf(after.text, 'button "Create account"'),
+  });
+  Assert.equal(await content(browser, "#out"), "idle", "not sent");
+  ok(/textbox "Email" .*invalid error="/.test(after.text), after.text);
+  BrowserTestUtils.removeTab(tab);
+});
+
+// From dev testing on app-like pages: the window does not scroll, a panel
+// does, and the observation said "0 of 0px" over a long list.
+add_task(async function test_scroll_reports_the_panel_that_scrolls() {
+  const page = `<!doctype html><title>App</title>
+    <body style="margin: 0; overflow: hidden; height: 100vh">
+      <div id="panel" style="height: 100vh; overflow: auto">
+        <div style="height: 3000px">Top of the list</div>
+        <button>Last item</button>
+      </div>
+    </body>`;
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "data:text/html," + encodeURIComponent(page)
+  );
+  const { box } = toolbox(tab);
+  const { text } = await box.callTool("page_observe", {});
+  const total = Number(text.match(/Scroll: 0 of (\d+)px/)?.[1]);
+  Assert.greater(total, 1000, text.split("\n").slice(0, 4).join(" / "));
+  let result;
+  for (let i = 0; i < 20; i++) {
+    result = await box.callTool("page_act", { action: "scroll", text: "down" });
+    if (result.text.startsWith("Did not scroll")) {
+      break;
+    }
+  }
+  ok(
+    result.text.startsWith("Did not scroll: already at the bottom."),
+    result.text.slice(0, 80)
+  );
+  ok(result.text.includes('button "Last item"'), "and it got there");
   BrowserTestUtils.removeTab(tab);
 });

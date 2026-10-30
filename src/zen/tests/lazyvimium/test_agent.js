@@ -936,3 +936,24 @@ add_task(async function test_log_redacts_and_rotates() {
   Assert.equal(off.path, null, "logging can be turned off");
   Services.prefs.clearUserPref("lazyvimium.agent.log.enabled");
 });
+
+add_task(function test_keys_parse_as_agents_name_them() {
+  const { parseKey } = ChromeUtils.importESModule(
+    "resource:///modules/lazyvimium/plugins/LazyvimiumAgentContent.sys.mjs"
+  );
+  const keyOf = text => {
+    const parsed = parseKey(text);
+    return parsed && [parsed.key, ...parsed.modifiers.map(m => m.key)];
+  };
+  Assert.deepEqual(keyOf("Enter"), ["Enter"]);
+  Assert.deepEqual(keyOf("enter"), ["Enter"], "any case");
+  Assert.deepEqual(keyOf("Space"), [" "]);
+  Assert.deepEqual(keyOf("Esc"), ["Escape"]);
+  Assert.deepEqual(keyOf("Shift+Tab"), ["Tab", "Shift"]);
+  Assert.deepEqual(keyOf("Ctrl+a"), ["a", "Control"]);
+  Assert.equal(parseKey("Control+a").info.keyCode, 65, "letters carry codes");
+  Assert.deepEqual(keyOf("Control++"), ["+", "Control"]);
+  Assert.deepEqual(keyOf("+"), ["+"]);
+  Assert.equal(parseKey("Hyper+Q"), null);
+  Assert.equal(parseKey("NotAKey"), null);
+});
