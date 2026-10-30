@@ -57,6 +57,32 @@
   outline: 2px solid var(--lazyvimium-mode-t);
   outline-offset: -2px;
   border-radius: var(--border-radius-medium, 6px);
+
+  &#urlbar-container {
+    border-radius: 999px;
+    corner-shape: round;
+  }
+}
+
+/* The urlbar is a pill while closed, with round hovers on its icons; open,
+   it keeps Zen's corners around the results. Zen's squircle corner-shape
+   would make the pill lumpy. */
+#urlbar:not([breakout-extend]) {
+  --urlbar-icon-border-radius: 999px !important;
+
+  &,
+  & .urlbar-background,
+  & :is(.urlbar-page-action, #tracking-protection-icon-container, #identity-icon-box, #notification-popup-box) {
+    border-radius: 999px !important;
+    corner-shape: round;
+  }
+}
+
+/* The placeholder Zen leaves in the toolbar while the urlbar floats open. */
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
+#urlbar-container:has(#urlbar[open][zen-floating-urlbar="true"]) {
+  border-radius: 999px !important;
+  corner-shape: round;
 }
 
 /* The library's cursor over a section's rows, the media grid, the spaces'
@@ -75,7 +101,7 @@
   }
 }
 
-/* The vim mode switch, in NORMAL's pink while on: in the top bar, or in the
+/* The vim mode switch, green while on: in the top bar, or in the
    row below the sidebar with Zen's single toolbar. */
 #lazyvimium-vim-mode-button {
   align-items: center;
@@ -88,7 +114,8 @@
     height: 26px;
     padding: 0 6px 0 8px;
     border: none;
-    border-radius: var(--border-radius-medium, 6px);
+    border-radius: 999px;
+    corner-shape: round;
     background: transparent;
     color: inherit;
     font: 600 11px/1 ui-monospace, monospace;
@@ -119,6 +146,7 @@
     width: 26px;
     height: 14px;
     border-radius: 7px;
+    corner-shape: round;
     background-color: color-mix(in srgb, currentColor 28%, transparent);
     transition: background-color 0.15s ease-out;
 
@@ -129,6 +157,7 @@
       width: 10px;
       height: 10px;
       border-radius: 50%;
+      corner-shape: round;
       background-color: light-dark(#ffffff, var(--lazyvimium-ink));
       transition: translate 0.15s ease-out;
     }
@@ -140,7 +169,7 @@
     }
 
     & .lazyvimium-vim-mode-track {
-      background-color: var(--lazyvimium-mode-n);
+      background-color: var(--lazyvimium-success);
 
       & > span {
         translate: 12px 0;
