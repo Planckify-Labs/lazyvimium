@@ -24,9 +24,21 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  ATTACH_MAX_BYTES:
+    "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
+  ATTACH_MAX_FILES:
+    "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
   LazyvimiumAgents:
     "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
   agentColor: "resource:///modules/lazyvimium/agent/LazyvimiumAgents.sys.mjs",
+  LazyvimiumAgentInstructions:
+    "resource:///modules/lazyvimium/agent/LazyvimiumAgentInstructions.sys.mjs",
+  LazyvimiumAgentInstructionsView:
+    "resource:///modules/lazyvimium/ui/LazyvimiumAgentInstructionsView.sys.mjs",
+  formatSize:
+    "resource:///modules/lazyvimium/ui/LazyvimiumAgentInstructionsView.sys.mjs",
+  mediaKind:
+    "resource:///modules/lazyvimium/ui/LazyvimiumAgentInstructionsView.sys.mjs",
   LazyvimiumAgentUiView:
     "resource:///modules/lazyvimium/ui/LazyvimiumAgentUiView.sys.mjs",
   LazyvimiumPicker:
@@ -98,6 +110,16 @@ export class LazyvimiumAgentDock {
   #agentChip;
   #modelChip;
   #tabChip;
+  #attachRow;
+  #sendButton;
+  #instructionsButton;
+  #instructions;
+  // What the user attached to the request they are writing: {name, size,
+  // path} for a file on disk, {name, size, bytes} for a pasted one.
+  #attachments = [];
+  // Why the last file was not attached, shown instead of the hint until the
+  // next key.
+  #notice = "";
   #status;
   #hint;
   #pill;
@@ -144,6 +166,18 @@ export class LazyvimiumAgentDock {
       }
       parent?.append(element);
       return element;
+    };
+    const roundButton = (className, parent, title) => {
+      const button = create(
+        "button",
+        `lazyvimium-agent-round-button ${className}`,
+        parent
+      );
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      // A click leaves the keys where the user was typing.
+      button.addEventListener("mousedown", event => event.preventDefault());
+      return button;
     };
     const iconButton = (className, parent, title) => {
       const button = create(
@@ -201,12 +235,79 @@ export class LazyvimiumAgentDock {
 
     const composer = create("div", "lazyvimium-agent-composer", this.#root);
     this.#tabChip = create("div", "lazyvimium-agent-tab", composer);
+    this.#attachRow = create("div", "lazyvimium-agent-attachments", composer);
+    this.#attachRow.hidden = true;
     this.#input = create("textarea", "lazyvimium-agent-input", composer);
     this.#input.rows = 1;
     this.#input.setAttribute("aria-label", "Ask your agent");
     this.#input.addEventListener("keydown", event => this.#onKey(event));
-    this.#input.addEventListener("input", () => this.#fitInput());
+    this.#input.addEventListener("input", () => {
+      this.#fitInput();
+      this.#syncComposer();
+    });
+    this.#input.addEventListener("paste", event => {
+      if (event.clipboardData?.files.length) {
+        event.preventDefault();
+        this.#attachDomFiles(event.clipboardData.files);
+      }
+    });
+    const bar = create("div", "lazyvimium-agent-composer-bar", composer);
+    const attach = roundButton("attach", bar, "Attach files");
+    attach.addEventListener("click", () => this.#pickFiles());
+    create("span", "lazyvimium-agent-spacer", bar);
+    this.#instructionsButton = roundButton(
+      "instructions",
+      bar,
+      "Agent instructions"
+    );
+    this.#instructionsButton.addEventListener("click", () =>
+      this.#instructions.open()
+    );
+    this.#sendButton = roundButton("send", bar, "Send (Enter)");
+    this.#sendButton.addEventListener("click", () => {
+      if (this.#conversation?.running) {
+        this.#conversation.stop();
+      } else {
+        this.#send();
+      }
+    });
     this.#hint = create("div", "lazyvimium-agent-hint", composer);
+    // Files dropped anywhere on the panel.
+    this.#root.addEventListener("dragover", event => {
+      if (event.dataTransfer?.types.includes("Files")) {
+        event.preventDefault();
+        this.#root.setAttribute("dragging", "");
+      }
+    });
+    this.#root.addEventListener("dragleave", event => {
+      if (!this.#root.contains(event.relatedTarget)) {
+        this.#root.removeAttribute("dragging");
+      }
+    });
+    this.#root.addEventListener("drop", event => {
+      this.#root.removeAttribute("dragging");
+      if (event.dataTransfer?.files.length) {
+        event.preventDefault();
+        this.#attachDomFiles(event.dataTransfer.files);
+      }
+    });
+
+    this.#instructions = new lazy.LazyvimiumAgentInstructionsView(window, {
+      parent: this.#root,
+      onPicking: busy => {
+        this.#picking = busy;
+      },
+      onClose: () => {
+        if (this.#open) {
+          this.#input.focus();
+        }
+      },
+    });
+    const offInstructions = lazy.LazyvimiumAgentInstructions.subscribe(() =>
+      this.#syncInstructions()
+    );
+    lazy.LazyvimiumAgentInstructions.load();
+    window.addEventListener("unload", offInstructions, { once: true });
 
     this.#grip = create("div", "lazyvimium-agent-grip", this.#root);
     this.#grip.setAttribute("role", "separator");
@@ -336,6 +437,7 @@ export class LazyvimiumAgentDock {
     }
     const focused = this.#root.contains(this.#window.document.activeElement);
     this.#open = false;
+    this.#instructions.close();
     this.#cancelHide();
     this.#hide();
     this.#syncPill();
@@ -797,6 +899,10 @@ export class LazyvimiumAgentDock {
     const ctrl =
       event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
     let handled = true;
+    if (this.#notice) {
+      this.#notice = "";
+      this.#queueRender();
+    }
     if (event.key == "Escape") {
       if (this.#layout == "split") {
         // Back to the page, as leaving a vim window; the panel stays.
@@ -880,22 +986,225 @@ export class LazyvimiumAgentDock {
     }
   }
 
+  // Attaching files.
+
+  async #pickFiles() {
+    const picker = Cc["@mozilla.org/filepicker;1"].createInstance(
+      Ci.nsIFilePicker
+    );
+    picker.init(
+      this.#window.browsingContext,
+      "Attach files",
+      Ci.nsIFilePicker.modeOpenMultiple
+    );
+    picker.appendFilters(Ci.nsIFilePicker.filterAll);
+    // The dialog is not part of the panel: moving to it must not hide it.
+    this.#picking = true;
+    let result;
+    try {
+      result = await new Promise(resolve => picker.open(resolve));
+    } finally {
+      this.#picking = false;
+    }
+    if (result == Ci.nsIFilePicker.returnOK) {
+      const paths = [];
+      for (const files = picker.files; files.hasMoreElements(); ) {
+        paths.push(files.getNext().QueryInterface(Ci.nsIFile).path);
+      }
+      await this.#attachPaths(paths);
+    }
+    if (this.#open) {
+      this.#input.focus();
+    }
+  }
+
+  // Dropped or pasted files: the browser's own know where they live; a
+  // picture from the clipboard does not, so its bytes are kept.
+  async #attachDomFiles(files) {
+    const found = [];
+    for (const file of files) {
+      if (file.mozFullPath) {
+        found.push(file.mozFullPath);
+      } else if (file.size > lazy.ATTACH_MAX_BYTES) {
+        this.#refuse(file.name, "is over 25 MB");
+      } else {
+        found.push({
+          name: file.name || "pasted-file",
+          size: file.size,
+          type: file.type,
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        });
+      }
+    }
+    await this.#attachPaths(found);
+  }
+
+  async #attachPaths(found) {
+    for (const item of found) {
+      if (this.#attachments.length >= lazy.ATTACH_MAX_FILES) {
+        this.#refuse(
+          "",
+          `Only ${lazy.ATTACH_MAX_FILES} files go with a request`
+        );
+        break;
+      }
+      if (typeof item != "string") {
+        this.#attachments.push(item);
+        continue;
+      }
+      const name = PathUtils.filename(item);
+      let info;
+      try {
+        info = await IOUtils.stat(item);
+      } catch (e) {
+        this.#refuse(name, "could not be read");
+        continue;
+      }
+      if (info.type == "directory") {
+        this.#refuse(name, "is a folder");
+      } else if (info.size > lazy.ATTACH_MAX_BYTES) {
+        this.#refuse(name, "is over 25 MB");
+      } else if (!this.#attachments.some(file => file.path == item)) {
+        this.#attachments.push({ name, size: info.size, path: item });
+      }
+    }
+    this.#renderAttachments();
+    this.#syncComposer();
+    this.#queueRender();
+  }
+
+  #refuse(name, why) {
+    this.#notice = name ? `${name} ${why}` : why;
+  }
+
+  #removeAttachment(file) {
+    this.#releasePreviews([file]);
+    this.#attachments = this.#attachments.filter(other => other != file);
+    this.#renderAttachments();
+    this.#syncComposer();
+  }
+
+  #renderAttachments() {
+    this.#attachRow.hidden = !this.#attachments.length;
+    this.#attachRow.replaceChildren(
+      ...this.#attachments.map(file => {
+        const kind = lazy.mediaKind(file);
+        if (kind) {
+          return this.#renderTile(file, kind);
+        }
+        const chip = this.#create("span", "lazyvimium-agent-attachment");
+        const name = this.#create(
+          "span",
+          "lazyvimium-agent-attachment-name",
+          file.name
+        );
+        const size = this.#create(
+          "span",
+          "lazyvimium-agent-attachment-size",
+          lazy.formatSize(file.size)
+        );
+        const remove = this.#create("button", "lazyvimium-agent-attachment-x");
+        remove.title = `Remove ${file.name}`;
+        remove.setAttribute("aria-label", remove.title);
+        remove.addEventListener("mousedown", event => event.preventDefault());
+        remove.addEventListener("click", () => this.#removeAttachment(file));
+        chip.title = file.path ?? file.name;
+        chip.append(name, size, remove);
+        return chip;
+      })
+    );
+  }
+
+  // A picture or video: a rounded preview of it, not a chip.
+  #renderTile(file, kind) {
+    const tile = this.#create("span", "lazyvimium-agent-attachment-tile");
+    tile.setAttribute("kind", kind);
+    tile.title = `${file.name} · ${lazy.formatSize(file.size)}`;
+    file.url ??= file.path
+      ? PathUtils.toFileURI(file.path)
+      : this.#window.URL.createObjectURL(
+          new this.#window.Blob([file.bytes], { type: file.type })
+        );
+    const media = this.#create(kind == "image" ? "img" : "video");
+    media.setAttribute("alt", file.name);
+    if (kind == "video") {
+      // Its first frame; it never plays.
+      media.muted = true;
+      media.preload = "metadata";
+      media.src = `${file.url}#t=0.1`;
+    } else {
+      media.src = file.url;
+    }
+    const remove = this.#create("button", "lazyvimium-agent-attachment-x");
+    remove.title = `Remove ${file.name}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.addEventListener("mousedown", event => event.preventDefault());
+    remove.addEventListener("click", () => this.#removeAttachment(file));
+    tile.append(media, remove);
+    return tile;
+  }
+
+  // The copies of pasted pictures the previews were made from.
+  #releasePreviews(files) {
+    for (const file of files) {
+      if (file.bytes && file.url) {
+        this.#window.URL.revokeObjectURL(file.url);
+      }
+    }
+  }
+
+  // The send button: it sends what is written or attached, and stops the
+  // agent while it works.
+  #syncComposer() {
+    const conversation = this.#conversation;
+    const running = !!conversation?.running;
+    const ready =
+      !!conversation &&
+      (!!this.#input.value.trim() || !!this.#attachments.length);
+    this.#sendButton.toggleAttribute("running", running);
+    this.#sendButton.disabled = !running && !ready;
+    this.#sendButton.title = running ? "Stop (Ctrl+C)" : "Send (Enter)";
+    this.#sendButton.setAttribute("aria-label", this.#sendButton.title);
+  }
+
+  #syncInstructions() {
+    const count = lazy.LazyvimiumAgentInstructions.activeCount;
+    this.#instructionsButton.toggleAttribute("active", count > 0);
+    this.#instructionsButton.title = count
+      ? `Agent instructions · ${count} on`
+      : "Agent instructions";
+    this.#instructionsButton.setAttribute(
+      "aria-label",
+      this.#instructionsButton.title
+    );
+  }
+
   #send() {
     const conversation = this.#conversation;
     const text = this.#input.value.trim();
-    if (!conversation || !text || conversation.running) {
+    const files = this.#attachments;
+    if (!conversation || (!text && !files.length) || conversation.running) {
       return;
     }
     this.#input.value = "";
+    this.#attachments = [];
+    this.#releasePreviews(files);
+    this.#renderAttachments();
     this.#fitInput();
+    this.#syncComposer();
     // The page takes focus while the agent types and presses keys in it;
     // the dock stays open, and <leader>aa comes back to it.
     if (this.#window.gBrowser.selectedBrowser == conversation.browser) {
       conversation.browser.focus();
     }
-    conversation.send(text).catch(e => {
-      console.error("Lazyvimium: the agent turn failed", e);
-    });
+    conversation
+      .send(
+        text,
+        files.map(({ name, path, bytes }) => ({ name, path, bytes }))
+      )
+      .catch(e => {
+        console.error("Lazyvimium: the agent turn failed", e);
+      });
   }
 
   /**
@@ -1018,8 +1327,11 @@ export class LazyvimiumAgentDock {
       placeholder = `Ask ${agent.name} to do something on this tab`;
     }
     this.#input.placeholder = placeholder;
-    this.#hint.textContent = hint;
+    this.#hint.textContent = this.#notice || hint;
+    this.#hint.toggleAttribute("warning", !!this.#notice);
     this.#root.toggleAttribute("running", !!conversation?.running);
+    this.#syncComposer();
+    this.#syncInstructions();
     this.#updateStatus();
   }
 
@@ -1033,6 +1345,7 @@ export class LazyvimiumAgentDock {
       streaming,
       message.text,
       message.revision,
+      message.files?.join("\u0001"),
     ].join("\u0000");
     const cached = this.#rows.get(message);
     if (cached?.key == key) {
@@ -1077,6 +1390,18 @@ export class LazyvimiumAgentDock {
       }
       case "tool":
         row.textContent = `used ${message.text}`;
+        break;
+      case "user":
+        row.append(this.#create("span", "", message.text));
+        if (message.files?.length) {
+          const files = this.#create("span", "lazyvimium-agent-sent-files");
+          for (const name of message.files) {
+            files.append(
+              this.#create("span", "lazyvimium-agent-attachment", name)
+            );
+          }
+          row.append(files);
+        }
         break;
       case "confirm": {
         row.setAttribute("status", message.status);

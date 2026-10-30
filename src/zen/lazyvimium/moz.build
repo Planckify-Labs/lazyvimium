@@ -9,6 +9,7 @@ EXTRA_JS_MODULES.lazyvimium += [
 EXTRA_JS_MODULES.lazyvimium.agent += [
     "agent/LazyvimiumAgentDetect.sys.mjs",
     "agent/LazyvimiumAgentHarness.sys.mjs",
+    "agent/LazyvimiumAgentInstructions.sys.mjs",
     "agent/LazyvimiumAgentLog.sys.mjs",
     "agent/LazyvimiumAgentNetwork.sys.mjs",
     "agent/LazyvimiumAgents.sys.mjs",
@@ -70,6 +71,7 @@ EXTRA_JS_MODULES.lazyvimium.ublock += [
 
 EXTRA_JS_MODULES.lazyvimium.ui += [
     "ui/LazyvimiumAgentDock.sys.mjs",
+    "ui/LazyvimiumAgentInstructionsView.sys.mjs",
     "ui/LazyvimiumAgentUiView.sys.mjs",
     "ui/LazyvimiumExplorer.sys.mjs",
     "ui/LazyvimiumHints.sys.mjs",

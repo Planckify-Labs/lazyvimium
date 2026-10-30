@@ -651,6 +651,14 @@
   &.close {
     background-image: url("chrome://browser/skin/zen-icons/close.svg");
   }
+
+  &.back {
+    background-image: url("chrome://browser/skin/zen-icons/arrow-left.svg");
+  }
+
+  &.trash {
+    background-image: url("chrome://browser/skin/zen-icons/trash.svg");
+  }
 }
 
 .lazyvimium-agent-log {
@@ -1127,6 +1135,13 @@
   opacity: 0.8;
 }
 
+@keyframes lazyvimium-agent-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
 @keyframes lazyvimium-agent-spin {
   to {
     transform: rotate(360deg);
@@ -1138,14 +1153,583 @@
   flex-direction: column;
   gap: 6px;
   margin: 0 10px 10px;
-  padding: 10px 12px 8px;
-  border-radius: 12px;
+  padding: 12px 10px 8px 14px;
+  border-radius: 22px;
   background-color: color-mix(in srgb, var(--lazyvimium-raised) 55%, transparent);
   box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-border) 80%, transparent);
 
   &:focus-within {
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lazyvimium-accent) 70%, transparent);
   }
+
+}
+
+/* Files held over the panel, to be dropped on it. */
+#lazyvimium-agent-dock[dragging]::after {
+  content: "Drop to attach";
+  position: absolute;
+  z-index: 3;
+  inset: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--lazyvimium-accent);
+  border-radius: 14px;
+  background-color: color-mix(in srgb, var(--lazyvimium-accent) 16%, var(--lazyvimium-agent-surface));
+  color: var(--lazyvimium-accent);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* The composer's bottom row: attach on the left, the instructions and send on
+   the right, all round. */
+.lazyvimium-agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.lazyvimium-agent-round-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  corner-shape: round;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 10%, transparent);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  -moz-context-properties: fill;
+  fill: var(--lazyvimium-agent-text);
+  color: inherit;
+  transition: background-color 120ms, fill 120ms, opacity 120ms;
+
+  &:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 18%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--lazyvimium-accent);
+    outline-offset: 2px;
+  }
+
+  &.attach {
+    background-image: url("chrome://browser/skin/zen-icons/plus.svg");
+  }
+
+  /* Opens the instructions: tinted in the brand's accent, solid while any is
+     on. */
+  &.instructions {
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 24%, transparent);
+    background-image: url("chrome://browser/skin/zen-icons/sparkles.svg");
+    fill: var(--lazyvimium-accent);
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--lazyvimium-accent) 36%, transparent);
+    }
+
+    &[active] {
+      background-color: var(--lazyvimium-accent);
+      fill: light-dark(#ffffff, var(--lazyvimium-ink));
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--lazyvimium-accent) 85%, var(--lazyvimium-agent-text));
+      }
+    }
+  }
+
+  &.send {
+    background-color: var(--lazyvimium-accent);
+    background-image: url("chrome://browser/skin/zen-icons/arrow-up.svg");
+    fill: light-dark(#ffffff, var(--lazyvimium-ink));
+
+    &:hover:not(:disabled) {
+      background-color: color-mix(in srgb, var(--lazyvimium-accent) 85%, var(--lazyvimium-agent-text));
+    }
+
+    &:disabled {
+      background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 10%, transparent);
+      fill: var(--lazyvimium-agent-muted);
+      opacity: 0.7;
+    }
+
+    /* While the agent works it stops it: a square in place of the arrow. */
+    &[running] {
+      background-image: none;
+
+      &::before {
+        content: "";
+        width: 11px;
+        height: 11px;
+        border-radius: 2px;
+        background-color: light-dark(#ffffff, var(--lazyvimium-ink));
+      }
+    }
+  }
+}
+
+.lazyvimium-agent-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.lazyvimium-agent-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  corner-shape: round;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 10%, transparent);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.lazyvimium-agent-attachment-name {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lazyvimium-agent-attachment-size {
+  flex: none;
+  font-size: 11px;
+  color: var(--lazyvimium-agent-muted);
+}
+
+.lazyvimium-agent-attachment-x {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  corner-shape: round;
+  background-color: transparent;
+  background-image: url("chrome://browser/skin/zen-icons/close.svg");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 10px;
+  -moz-context-properties: fill;
+  fill: var(--lazyvimium-agent-muted);
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 16%, transparent);
+    fill: var(--lazyvimium-agent-text);
+  }
+}
+
+/* A picture or video attached: its preview, rounded, with a cross on its
+   corner. */
+.lazyvimium-agent-attachment-tile {
+  position: relative;
+  /* A span is sized only as a flex item; the instructions' slot is a block. */
+  display: block;
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 10%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-border) 80%, transparent);
+
+  & > :is(img, video) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* A mark that it is a video. */
+  &[kind="video"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+  }
+
+  &[kind="video"]::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    margin: auto;
+    width: 0;
+    height: 0;
+    border-block: 6px solid transparent;
+    border-inline-start: 10px solid #ffffff;
+    translate: 2px 0;
+    pointer-events: none;
+  }
+
+  & > .lazyvimium-agent-attachment-x {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    inset-inline-end: 4px;
+    width: 20px;
+    height: 20px;
+    background-color: rgba(0, 0, 0, 0.6);
+    background-size: 10px;
+    fill: #ffffff;
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.85);
+      fill: #ffffff;
+    }
+  }
+}
+
+/* The files of a request already sent, under its text. */
+.lazyvimium-agent-sent-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+
+  & .lazyvimium-agent-attachment {
+    padding: 1px 9px;
+    background-color: color-mix(in srgb, var(--lazyvimium-agent-user) 22%, transparent);
+  }
+}
+
+/* The instructions page, over the whole panel. */
+.lazyvimium-agent-instructions {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+  background-color: var(--lazyvimium-agent-surface);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+/* Padding counts inside each box's width, so nothing is wider than the page. */
+.lazyvimium-agent-instructions :is(*, ::before, ::after) {
+  box-sizing: border-box;
+}
+
+.lazyvimium-agent-instructions-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.lazyvimium-agent-instructions-title {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lazyvimium-agent-instructions-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  /* The page scrolls only up and down. */
+  overflow-x: hidden;
+}
+
+.lazyvimium-agent-instructions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lazyvimium-agent-instructions-empty {
+  margin: 4px 6px;
+  line-height: 1.45;
+  color: var(--lazyvimium-agent-muted);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.lazyvimium-agent-instruction {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background-color: color-mix(in srgb, var(--lazyvimium-raised) 70%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--lazyvimium-agent-border) 80%, transparent);
+
+  &:focus-within {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lazyvimium-accent) 70%, transparent);
+  }
+
+  animation: lazyvimium-agent-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+
+  /* Cards come in one after another. */
+  &:nth-child(2) {
+    animation-delay: 50ms;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 100ms;
+  }
+
+  &:nth-child(n + 4) {
+    animation-delay: 140ms;
+  }
+
+  /* Switched off: kept, but not followed. */
+  &[off] .lazyvimium-agent-instruction-title,
+  &[off] .lazyvimium-agent-instruction-text {
+    opacity: 0.55;
+  }
+}
+
+.lazyvimium-agent-instruction-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lazyvimium-agent-switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  corner-shape: round;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-text) 22%, transparent);
+  transition: background-color 160ms;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    inset-inline-start: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    corner-shape: round;
+    background-color: light-dark(#ffffff, var(--lazyvimium-agent-text));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1), background-color 160ms;
+  }
+
+  &[aria-checked="true"] {
+    background-color: var(--lazyvimium-accent);
+
+    &::before {
+      transform: translateX(16px);
+      background-color: light-dark(#ffffff, var(--lazyvimium-ink));
+    }
+
+    &:dir(rtl)::before {
+      transform: translateX(-16px);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--lazyvimium-accent);
+    outline-offset: 2px;
+  }
+}
+
+.lazyvimium-agent-instruction-title {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+
+  &::placeholder {
+    color: var(--lazyvimium-agent-muted);
+    opacity: 1;
+  }
+}
+
+/* The file beside the text: a button to attach one, or its preview. */
+.lazyvimium-agent-instruction-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.lazyvimium-agent-instruction-file {
+  flex: none;
+  width: 72px;
+}
+
+.lazyvimium-agent-instruction-file-add {
+  display: block;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 1.5px dashed color-mix(in srgb, var(--lazyvimium-agent-muted) 70%, transparent);
+  border-radius: 16px;
+  background-color: transparent;
+  background-image: url("chrome://browser/skin/zen-icons/plus.svg");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 18px;
+  -moz-context-properties: fill;
+  fill: var(--lazyvimium-agent-muted);
+  transition: border-color 120ms, background-color 120ms, fill 120ms;
+
+  &:hover {
+    border-color: var(--lazyvimium-accent);
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 12%, transparent);
+    fill: var(--lazyvimium-accent);
+  }
+}
+
+/* A file held over the card, to be dropped on it. */
+.lazyvimium-agent-instruction[dragging] {
+  box-shadow: inset 0 0 0 1.5px var(--lazyvimium-accent);
+
+  & .lazyvimium-agent-instruction-file-add {
+    border-color: var(--lazyvimium-accent);
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 20%, transparent);
+    fill: var(--lazyvimium-accent);
+  }
+}
+
+/* A document in place of a picture: its kind, then its name. */
+.lazyvimium-agent-attachment-tile[kind="doc"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  background-color: color-mix(in srgb, var(--lazyvimium-accent) 16%, transparent);
+}
+
+.lazyvimium-agent-doc-ext {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--lazyvimium-accent);
+}
+
+.lazyvimium-agent-doc-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  color: var(--lazyvimium-agent-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lazyvimium-agent-instruction-error {
+  font-size: 11px;
+  color: var(--lazyvimium-warning);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.lazyvimium-agent-instruction-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 72px;
+  margin: 0;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  outline: none;
+  /* It grows with its text (the view fits its height), so no grip. */
+  resize: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background-color: color-mix(in srgb, var(--lazyvimium-agent-surface) 60%, transparent);
+  color: inherit;
+  font: inherit;
+  line-height: 1.45;
+
+  &::placeholder {
+    color: var(--lazyvimium-agent-muted);
+    opacity: 1;
+  }
+}
+
+.lazyvimium-agent-instructions-add,
+.lazyvimium-agent-instructions-done {
+  flex: none;
+  padding: 9px 16px;
+  border-radius: 999px;
+  corner-shape: round;
+  font: inherit;
+  font-weight: 600;
+}
+
+.lazyvimium-agent-instructions-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0.5px solid var(--lazyvimium-agent-border);
+  background: transparent;
+  color: inherit;
+
+  &:hover {
+    border-color: var(--lazyvimium-accent);
+  }
+
+  & .plus {
+    width: 14px;
+    height: 14px;
+    background-color: currentColor;
+    mask: url("chrome://browser/skin/zen-icons/plus.svg") center / contain no-repeat;
+  }
+}
+
+.lazyvimium-agent-instructions-done {
+  border: none;
+  background-color: var(--lazyvimium-accent);
+  color: light-dark(#ffffff, var(--lazyvimium-ink));
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--lazyvimium-accent) 85%, var(--lazyvimium-agent-text));
+  }
+}
+
+.lazyvimium-agent-instructions :is(button:focus-visible) {
+  outline: 2px solid var(--lazyvimium-accent);
+  outline-offset: 2px;
 }
 
 .lazyvimium-agent-chip {
@@ -1232,8 +1816,13 @@
 }
 
 .lazyvimium-agent-hint {
+  padding-inline-start: 4px;
   font-size: 11px;
   color: var(--lazyvimium-agent-muted);
+
+  &[warning] {
+    color: var(--lazyvimium-warning);
+  }
 }
 
 .lazyvimium-agent-button {
@@ -1371,6 +1960,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .lazyvimium-agent-step-icon,
+  .lazyvimium-agent-instruction,
+  .lazyvimium-agent-switch,
+  .lazyvimium-agent-switch::before,
   .lazyvimium-agent-chip::before,
   #lazyvimium-agent-pill::before,
   #lazyvimium-agent-handle::before,

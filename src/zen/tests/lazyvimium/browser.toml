@@ -15,6 +15,8 @@ support-files = [
 ["browser_lazyvimium_agent_bench.js"]
 support-files = ["file_agent_heavy.html"]
 
+["browser_lazyvimium_agent_composer.js"]
+
 ["browser_lazyvimium_agent_network.js"]
 support-files = [
   "file_agent_network.html",
