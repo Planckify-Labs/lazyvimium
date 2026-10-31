@@ -408,8 +408,7 @@ export class LazyvimiumLibraryView {
   }
 
   /**
-   * Label every item on screen, flash.nvim style, and move the cursor to
-   * the one typed.
+   * Label every item on screen and move the cursor to the one typed.
    *
    * @returns {Promise<void>}
    */

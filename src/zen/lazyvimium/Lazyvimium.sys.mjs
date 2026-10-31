@@ -794,7 +794,9 @@ class LazyvimiumService {
           },
         },
         allFrames: true,
-        messageManagerGroups: ["browsers"],
+        // Tabs, and the popups, sidebars and embedded options pages of
+        // extensions.
+        messageManagerGroups: ["browsers", "webext-browsers"],
         // The parent checks everything a page sends: runFromKey only runs
         // mapped actions and updateState sanitizes the state.
         safeForUntrustedWebProcess: true,

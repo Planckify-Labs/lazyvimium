@@ -37,8 +37,39 @@ export class LazyvimiumKeysParent extends JSWindowActorParent {
         return lazy.yankAt(lazy.Lazyvimium, data.index);
       case "Lazyvimium:FrameQuery":
         return this.#askFrame(data);
+      case "Lazyvimium:RunInTop":
+        return this.#runInTop(browser, data);
+      case "Lazyvimium:FrameIdle":
+        this.#topActor(browser)?.sendAsyncMessage("Lazyvimium:ResendState");
+        break;
     }
     return undefined;
+  }
+
+  #topActor(browser) {
+    return browser.browsingContext?.currentWindowGlobal?.getActor(
+      "LazyvimiumKeys"
+    );
+  }
+
+  // A key typed in a frame runs its content action in the page, and the
+  // page takes the focus, so the keys that follow go to it as well. Only
+  // actions the keymap points at run, whatever the frame says.
+  async #runInTop(browser, { id, args } = {}) {
+    const action = lazy.Lazyvimium.actions.get(id);
+    if (
+      action?.where != "content" ||
+      !lazy.Lazyvimium.keymap.maps(id) ||
+      !this.#topActor(browser)
+    ) {
+      return;
+    }
+    try {
+      await this.#topActor(browser).sendQuery("Lazyvimium:TakeFocus");
+      await lazy.Lazyvimium.run(id, args ?? {}, { browser });
+    } catch (e) {
+      console.error(`Lazyvimium: "${id}" failed`, e);
+    }
   }
 
   // Pass a query to another frame of this page, which a page's frames may

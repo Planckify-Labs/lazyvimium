@@ -343,8 +343,7 @@ export class LazyvimiumToolbar {
   }
 
   /**
-   * Label every item, flash.nvim style, and move the cursor to the one
-   * typed.
+   * Label every item and move the cursor to the one typed.
    *
    * @returns {Promise<void>}
    */

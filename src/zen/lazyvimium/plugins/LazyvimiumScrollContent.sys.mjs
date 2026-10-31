@@ -31,7 +31,9 @@ function largestScrollable(document, vertical) {
   }
   let best = null;
   let bestArea = 0;
-  for (const element of document.body?.querySelectorAll("*") ?? []) {
+  for (const element of document.body
+    ? LazyvimiumDom.deepElements(document.body)
+    : []) {
     const area = element.clientWidth * element.clientHeight;
     if (area > bestArea && canScroll(element, vertical)) {
       best = element;

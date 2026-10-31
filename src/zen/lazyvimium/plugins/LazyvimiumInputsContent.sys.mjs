@@ -27,8 +27,13 @@ function isShown(element) {
  * @returns {Element[]}
  */
 function fields(document) {
-  return [...document.querySelectorAll(FIELDS)]
-    .filter(element => LazyvimiumDom.isEditable(element) && isShown(element))
+  return [...LazyvimiumDom.deepElements(document)]
+    .filter(
+      element =>
+        element.matches(FIELDS) &&
+        LazyvimiumDom.isEditable(element) &&
+        isShown(element)
+    )
     .map(element => ({ element, rect: element.getBoundingClientRect() }))
     .sort((a, b) =>
       Math.abs(a.rect.top - b.rect.top) > ROW_TOLERANCE

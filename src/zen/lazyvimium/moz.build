@@ -37,6 +37,7 @@ EXTRA_JS_MODULES.lazyvimium.core += [
     "core/LazyvimiumControls.sys.mjs",
     "core/LazyvimiumDom.sys.mjs",
     "core/LazyvimiumJumpLabels.sys.mjs",
+    "core/LazyvimiumKeyClaims.sys.mjs",
     "core/LazyvimiumKeyEngine.sys.mjs",
     "core/LazyvimiumKeymap.sys.mjs",
     "core/LazyvimiumKeys.sys.mjs",

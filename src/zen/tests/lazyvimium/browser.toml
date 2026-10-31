@@ -27,11 +27,15 @@ support-files = [
 
 ["browser_lazyvimium_explorer.js"]
 
+["browser_lazyvimium_internal_pages.js"]
+
 ["browser_lazyvimium_jump.js"]
 support-files = [
   "file_jump_frame_host.html",
   "file_jump_frame.html",
   "file_jump_inner.html",
+  "file_trap_frame.html",
+  "file_trap_host.html",
 ]
 
 ["browser_lazyvimium_keys.js"]

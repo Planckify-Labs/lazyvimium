@@ -74,6 +74,14 @@ function isKeyNavigable(popup) {
   );
 }
 
+// Whether a panel shows an extension's page, like a toolbar button's popup.
+// Its keys are that page's, as they are in a tab.
+function showsExtensionPage(popup) {
+  return [
+    ...popup.querySelectorAll('browser[webextension-view-type="popup"]'),
+  ].some(browser => browser.checkVisibility());
+}
+
 /**
  * vim keys in the window's open menus and panels: the main menu, context
  * menus, a toolbar button's dropdown. While one is open, keys belong to it;
@@ -114,7 +122,7 @@ export class LazyvimiumMenuKeys {
         this.#open.delete(popup);
       }
     }
-    return this.#open.size > 0;
+    return [...this.#open].some(popup => !showsExtensionPage(popup));
   }
 
   /**

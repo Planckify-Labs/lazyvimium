@@ -63,7 +63,7 @@ export const LAZYVIMIUM_ROLES = {
   "mode-l": "teal",
   "statusline-background": "night",
   "statusline-text": "snow",
-  // Jump labels, in flash.nvim's colors from the user's LazyVim setup.
+  // Jump labels, in the colors of the user's LazyVim setup.
   hint: { light: "#a25772", dark: "#a25772" },
   "hint-text": { light: "#eef5ff", dark: "#eef5ff" },
   "which-key-key": "orange",

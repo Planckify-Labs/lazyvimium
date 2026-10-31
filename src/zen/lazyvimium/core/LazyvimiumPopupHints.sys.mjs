@@ -4,17 +4,35 @@
 
 import { LazyvimiumControls } from "resource:///modules/lazyvimium/core/LazyvimiumControls.sys.mjs";
 import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
-import { hintLabels } from "resource:///modules/lazyvimium/ui/LazyvimiumHints.sys.mjs";
+import { LazyvimiumKeyClaims } from "resource:///modules/lazyvimium/core/LazyvimiumKeyClaims.sys.mjs";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+// Letters vim leaves unbound in normal mode, so that a popup has its labels
+// and every key of a regular page.
+const LABELS = "adfewocmxzbqt";
+
+function popupLabels(count) {
+  if (count <= LABELS.length) {
+    return [...LABELS].slice(0, count);
+  }
+  const labels = [];
+  for (const first of LABELS) {
+    for (const second of LABELS) {
+      labels.push(first + second);
+    }
+  }
+  return labels.slice(0, count);
+}
 
 // The popup keeps changing for a while after it loads.
 const SETTLE_MS = [100, 300, 800];
 
 /**
- * Jump labels over every control of an extension's popup, flash.nvim style,
- * the way the sidebar's rows get them: typing a label presses its control,
- * and any other key goes to the popup. They follow the popup as it changes,
+ * Jump labels over every control of an extension's popup, the way the
+ * sidebar's rows get them: typing a label presses its control, and any other
+ * key goes to the popup, where vim's keys work as on a page. Their letters are
+ * the ones vim's normal mode leaves free. They follow the popup as it changes,
  * and stay out of the way while a field has focus.
  */
 export class LazyvimiumPopupHints {
@@ -40,6 +58,7 @@ export class LazyvimiumPopupHints {
     window.addEventListener("focusin", this, true);
     window.addEventListener("focusout", this, true);
     window.addEventListener("resize", this);
+    LazyvimiumKeyClaims.set(window, event => this.#claims(event));
     this.#observer = new window.MutationObserver(() => this.#rescan());
     this.#observer.observe(window.document, {
       subtree: true,
@@ -59,6 +78,7 @@ export class LazyvimiumPopupHints {
 
   destroy() {
     const window = this.#window;
+    LazyvimiumKeyClaims.delete(window);
     try {
       window.removeEventListener("keydown", this, true);
       window.removeEventListener("focusin", this, true);
@@ -122,10 +142,12 @@ export class LazyvimiumPopupHints {
     if (this.#suspended || !this.#window.document.documentElement) {
       return;
     }
-    this.#targets = LazyvimiumControls.inReadingOrder(
+    const targets = LazyvimiumControls.inReadingOrder(
       LazyvimiumControls.find(this.#window)
     );
-    this.#labels = hintLabels(this.#targets.length);
+    this.#labels = popupLabels(targets.length);
+    // Controls past the last label are left alone.
+    this.#targets = targets.slice(0, this.#labels.length);
     this.#draw();
     // Drawing the labels changed the document, which is not the popup's doing.
     this.#observer.takeRecords();
@@ -160,6 +182,26 @@ export class LazyvimiumPopupHints {
     });
     this.#root = root;
     document.documentElement.append(root);
+  }
+
+  // Whether a key is one of the labels', which go before vim's keys.
+  #claims(event) {
+    if (
+      !event.isTrusted ||
+      this.#suspended ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.metaKey
+    ) {
+      return false;
+    }
+    if (event.key == "Escape") {
+      return !!this.#typed;
+    }
+    return (
+      event.key.length == 1 &&
+      this.#labels.some(label => label.startsWith(this.#typed + event.key))
+    );
   }
 
   #onKeyDown(event) {

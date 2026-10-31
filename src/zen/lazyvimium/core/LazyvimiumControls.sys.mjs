@@ -2,8 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
+
 // What a user can press, type in or toggle, by its markup.
 const CONTROLS = [
+  // The controls of the browser's own pages, like its settings.
+  "checkbox",
+  "radio",
+  "menulist",
+  "richlistitem",
+  "tab",
+  "toolbarbutton",
   "a[href]",
   "button",
   "input:not([type=hidden])",
@@ -49,14 +58,15 @@ function isShown(window, element) {
   ) {
     return false;
   }
-  const hit = window.document.elementFromPoint(
+  const hit = LazyvimiumDom.deepElementFromPoint(
+    window.document,
     Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1),
     Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1)
   );
   return (
     !!hit &&
-    (element.contains(hit) ||
-      hit.contains(element) ||
+    (LazyvimiumDom.composedContains(element, hit) ||
+      LazyvimiumDom.composedContains(hit, element) ||
       hit.closest("label")?.control === element)
   );
 }
@@ -70,21 +80,22 @@ export const LazyvimiumControls = {
    */
   find(window) {
     const found = [];
-    const semantic = new Set(window.document.querySelectorAll(CONTROLS));
     let seen = 0;
-    for (const element of window.document.querySelectorAll("body *")) {
+    const root = window.document.body ?? window.document.documentElement;
+    for (const element of LazyvimiumDom.deepElements(root)) {
       if (++seen > MAX_ELEMENTS) {
         break;
       }
-      const isControl = semantic.has(element);
+      const isControl = element.matches(CONTROLS);
       // A div with a click handler has no markup to say so, only a hand for
       // a cursor; its children share it.
+      const parent = LazyvimiumDom.composedParent(element);
       const hasHand =
         !isControl &&
         window.getComputedStyle(element).cursor == "pointer" &&
-        !found.some(other => other.contains(element)) &&
-        element.parentElement &&
-        window.getComputedStyle(element.parentElement).cursor != "pointer";
+        !found.some(other => LazyvimiumDom.composedContains(other, element)) &&
+        parent &&
+        window.getComputedStyle(parent).cursor != "pointer";
       if (
         (isControl || hasHand) &&
         !element.disabled &&
@@ -103,21 +114,22 @@ export const LazyvimiumControls = {
    * @returns {Element[]}
    */
   frames(window) {
-    return [...window.document.querySelectorAll("iframe, frame")].filter(
-      frame => {
-        const rect = frame.getBoundingClientRect();
-        return (
-          frame.browsingContext &&
-          frame.checkVisibility() &&
-          rect.width >= MIN_SIZE &&
-          rect.height >= MIN_SIZE &&
-          rect.bottom > 0 &&
-          rect.right > 0 &&
-          rect.top < window.innerHeight &&
-          rect.left < window.innerWidth
-        );
-      }
+    const frames = [...LazyvimiumDom.deepElements(window.document)].filter(
+      element => element.matches("iframe, frame")
     );
+    return frames.filter(frame => {
+      const rect = frame.getBoundingClientRect();
+      return (
+        frame.browsingContext &&
+        frame.checkVisibility() &&
+        rect.width >= MIN_SIZE &&
+        rect.height >= MIN_SIZE &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth
+      );
+    });
   },
 
   /**

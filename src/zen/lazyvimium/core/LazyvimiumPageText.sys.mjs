@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
+
 const NOT_TEXT = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "SELECT"]);
 const MAX_LENGTH = 2_000_000;
 
@@ -28,25 +30,19 @@ export class LazyvimiumPageText {
       if (!blocks.has(element)) {
         const display = window.getComputedStyle(element).display;
         const inline = display.startsWith("inline") || display == "contents";
-        blocks.set(
-          element,
-          inline && element.parentElement
-            ? blockOf(element.parentElement)
-            : element
-        );
+        const parent = LazyvimiumDom.composedParent(element);
+        blocks.set(element, inline && parent ? blockOf(parent) : element);
       }
       return blocks.get(element);
     };
     const visible = new Map();
-    const walker = window.document.createTreeWalker(
-      window.document.body ?? window.document.documentElement,
-      window.NodeFilter.SHOW_TEXT
-    );
     let previousBlock = null;
     const parts = [];
     let length = 0;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const parent = node.parentElement;
+    for (const node of LazyvimiumDom.deepTextNodes(
+      window.document.body ?? window.document.documentElement
+    )) {
+      const parent = LazyvimiumDom.composedParent(node);
       if (!node.data || !parent || NOT_TEXT.has(parent.tagName)) {
         continue;
       }
@@ -95,7 +91,14 @@ export class LazyvimiumPageText {
     const point = this.#window.document.createRange();
     point.setStart(node, offset);
     point.collapse(true);
-    const next = this.#firstIndex(text => point.comparePoint(text, 0) >= 0);
+    const next = this.#firstIndex(text => {
+      try {
+        return point.comparePoint(text, 0) >= 0;
+      } catch {
+        // A text in another shadow tree has no place against the point.
+        return false;
+      }
+    });
     return next == this.#nodes.length ? this.#text.length : this.#bases[next];
   }
 
@@ -138,17 +141,23 @@ export class LazyvimiumPageText {
    * @returns {{start: number, end: number}|null} Where the element's text is.
    */
   elementRange(element) {
-    const inside = this.#window.document.createRange();
-    inside.selectNodeContents(element);
-    const first = this.#firstIndex(text => inside.comparePoint(text, 0) >= 0);
-    const after = this.#firstIndex(text => inside.comparePoint(text, 0) > 0);
-    if (first >= after) {
+    // An element's texts, shadow trees in it too, follow one another.
+    let first = -1;
+    let last = -1;
+    for (let i = 0; i < this.#nodes.length; i++) {
+      if (LazyvimiumDom.composedContains(element, this.#nodes[i])) {
+        first = first == -1 ? i : first;
+        last = i;
+      } else if (first != -1) {
+        break;
+      }
+    }
+    if (first == -1) {
       return null;
     }
-    const last = this.#nodes[after - 1];
     return {
       start: this.#bases[first],
-      end: this.#bases[after - 1] + last.data.length,
+      end: this.#bases[last] + this.#nodes[last].data.length,
     };
   }
 

@@ -651,3 +651,86 @@ add_task(async function test_copy_events_join_the_ring() {
   );
   BrowserTestUtils.removeTab(tab);
 });
+
+add_task(async function test_keys_typed_in_a_frame_act_on_the_page() {
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    ROOT + "file_trap_host.html"
+  );
+  registerCleanupFunction(() => {
+    if (gBrowser.tabs.includes(tab)) {
+      BrowserTestUtils.removeTab(tab);
+    }
+  });
+  const browser = tab.linkedBrowser;
+  browser.focus();
+  const frame = browser.browsingContext.children.find(
+    child => child.currentURI?.host == "example.org"
+  );
+  ok(frame, "the page has a frame of another site");
+  const focusIn = id =>
+    SpecialPowers.spawn(frame, [id], elementId => {
+      content.document.getElementById(elementId).focus();
+    });
+  const scrolls = async () => ({
+    page: await inPage(tab, () => content.scrollY),
+    frame: await SpecialPowers.spawn(frame, [], () => content.scrollY),
+  });
+
+  await focusIn("inside");
+  type("G");
+  await TestUtils.waitForCondition(
+    async () => (await scrolls()).page > 1000,
+    "G from inside a frame goes to the bottom of the page"
+  );
+  is((await scrolls()).frame, 0, "and the frame did not scroll");
+
+  // The page has the focus now: the keys that follow are the page's too.
+  type("gg");
+  await TestUtils.waitForCondition(
+    async () => (await scrolls()).page == 0,
+    "gg goes to the top of the page"
+  );
+
+  await focusIn("inside");
+  type("j");
+  await TestUtils.waitForCondition(
+    async () => (await scrolls()).page > 0,
+    "j scrolls the page from inside a frame"
+  );
+  is((await scrolls()).frame, 0, "not the frame");
+
+  await focusIn("inside");
+  type("v");
+  await TestUtils.waitForCondition(
+    async () => (await labelsShown(tab)).length > 0,
+    "v from inside a frame labels the page's words"
+  );
+  await dismissLabels(tab);
+
+  // Typing in a field of the frame stays in the frame.
+  await focusIn("field");
+  await TestUtils.waitForCondition(
+    () => statuslineText().includes("INSERT"),
+    "a field of the frame is insert mode"
+  );
+  // The scroll of `j` has to be over.
+  let before;
+  await TestUtils.waitForCondition(async () => {
+    const last = before;
+    before = (await scrolls()).page;
+    return before === last;
+  }, "the page stopped scrolling");
+  type("jG");
+  await TestUtils.waitForCondition(
+    async () =>
+      (await SpecialPowers.spawn(
+        frame,
+        [],
+        () => content.document.getElementById("field").value
+      )) == "jG",
+    "the keys are typed into the field"
+  );
+  is((await scrolls()).page, before, "and the page does not scroll");
+  BrowserTestUtils.removeTab(tab);
+});

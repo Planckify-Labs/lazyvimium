@@ -175,14 +175,14 @@ add_task(async function test_the_popup_has_labels() {
 
   Assert.deepEqual(
     await extension.awaitMessage("labels"),
-    ["a", "s", "d"],
-    "the button, the field and the clickable div are labelled in order"
+    ["a", "d", "f"],
+    "the button, the field and the clickable div are labelled in order, with letters vim leaves free"
   );
   EventUtils.synthesizeKey("a");
   await extension.awaitMessage("pressed");
   ok(true, "typing a label presses its control");
 
-  EventUtils.synthesizeKey("s");
+  EventUtils.synthesizeKey("d");
   Assert.deepEqual(
     await extension.awaitMessage("focused"),
     [],

@@ -4,7 +4,7 @@
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-// Hint labels, flash.nvim style. j and k move the selection instead.
+// Hint labels. j and k move the selection instead.
 export const LABELS = "asdfghlqweruiopzxcvbnmty";
 
 /**

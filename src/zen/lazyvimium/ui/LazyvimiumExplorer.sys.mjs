@@ -487,8 +487,7 @@ export class LazyvimiumExplorer {
   }
 
   /**
-   * Label every row on screen, flash.nvim style, and wait for one to be
-   * typed.
+   * Label every row on screen and wait for one to be typed.
    *
    * @returns {Promise<LazyvimiumExplorerRow|null>}
    */

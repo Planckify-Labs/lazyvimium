@@ -12,6 +12,7 @@ import {
   findTextObject,
   paragraphEdge,
 } from "resource:///modules/lazyvimium/core/LazyvimiumTextObjects.sys.mjs";
+import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
 import { LazyvimiumPageText } from "resource:///modules/lazyvimium/core/LazyvimiumPageText.sys.mjs";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -133,12 +134,10 @@ export function reveal(window) {
  * @returns {{node: Node, offset: number}|null}
  */
 function firstVisibleText(window) {
-  const walker = window.document.createTreeWalker(
-    window.document.body ?? window.document.documentElement,
-    window.NodeFilter.SHOW_TEXT
-  );
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const parent = node.parentElement;
+  for (const node of LazyvimiumDom.deepTextNodes(
+    window.document.body ?? window.document.documentElement
+  )) {
+    const parent = LazyvimiumDom.composedParent(node);
     if (
       !node.data.trim() ||
       !parent ||

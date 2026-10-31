@@ -257,15 +257,13 @@ function caretPoint(window) {
 function textSource(window, actor) {
   const from = caretPoint(window) ?? center(window);
   const segments = [];
-  const walker = window.document.createTreeWalker(
-    window.document.body ?? window.document.documentElement,
-    window.NodeFilter.SHOW_TEXT
-  );
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+  for (const node of LazyvimiumDom.deepTextNodes(
+    window.document.body ?? window.document.documentElement
+  )) {
     if (segments.length >= MAX_SEGMENTS) {
       break;
     }
-    const parent = node.parentElement;
+    const parent = LazyvimiumDom.composedParent(node);
     if (
       !node.data.trim() ||
       !parent ||

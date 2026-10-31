@@ -34,7 +34,7 @@ export function isOnScreen(element) {
 }
 
 /**
- * Jump labels on browser UI elements, flash.nvim style: each element gets a
+ * Jump labels on browser UI elements: each element gets a
  * label (shown by lazyvimium.css from the lazyvimium-hint attribute), and
  * typing one picks its element. Any other key cancels.
  */

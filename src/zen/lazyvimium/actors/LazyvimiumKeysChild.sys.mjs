@@ -3,6 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
+import { LazyvimiumKeyClaims } from "resource:///modules/lazyvimium/core/LazyvimiumKeyClaims.sys.mjs";
 import { LazyvimiumKeys } from "resource:///modules/lazyvimium/core/LazyvimiumKeys.sys.mjs";
 import { LazyvimiumKeyEngine } from "resource:///modules/lazyvimium/core/LazyvimiumKeyEngine.sys.mjs";
 import {
@@ -20,6 +21,17 @@ const JUMP_MODULE =
 // A page that keeps refocusing its field gets it after this many refusals,
 // rather than a focus fight.
 const MAX_REFUSED_FOCUS = 3;
+
+// Content actions that work on the field the keys went to, so they stay in
+// its frame; the others act on the page.
+function actsOnFocusedField(id) {
+  return (
+    id.startsWith("edit.") ||
+    id.startsWith("input.") ||
+    id.startsWith("yank.put") ||
+    id == "mode.insert"
+  );
+}
 
 function currentConfig() {
   const config = Services.cpmm.sharedData.get(LAZYVIMIUM_SHARED_KEY);
@@ -114,6 +126,19 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
           this.contentWindow,
           message.data
         );
+      // A frame sent its key's action up: the keys that follow come to the
+      // page, not to the frame that had the focus.
+      case "Lazyvimium:TakeFocus":
+        this.contentWindow?.focus();
+        break;
+      // A frame has nothing to say any more; the page speaks again.
+      case "Lazyvimium:ResendState": {
+        const engine = this.#ensureEngine();
+        if (engine) {
+          this.#reportState(engine);
+        }
+        break;
+      }
     }
     return undefined;
   }
@@ -269,6 +294,14 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
       return;
     }
     this.#syncMode();
+    // An extension popup's labels take their letters in normal mode, which
+    // the keymap leaves free for them.
+    if (
+      engine.mode == "n" &&
+      LazyvimiumKeyClaims.claims(this.contentWindow, event)
+    ) {
+      return;
+    }
     if (engine.feed(LazyvimiumKeys.fromEvent(event))) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -288,6 +321,18 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
       if (action.params?.lhs) {
         // One action serves many keys, like every text object's.
         args.lhs = mapping.lhs;
+      }
+      const inFrame = !!this.browsingContext.parent;
+      if (inFrame && !actsOnFocusedField(mapping.rhs)) {
+        // The page is what the keys act on, not the frame that has the
+        // focus, which would trap them there.
+        this.sendAsyncMessage("Lazyvimium:RunInTop", {
+          id: mapping.rhs,
+          args,
+        });
+        if (mapping.rhs != "mode.normal") {
+          return;
+        }
       }
       Promise.resolve()
         .then(() => this.runAction(mapping.rhs, args))
@@ -326,10 +371,22 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
         "resource:///modules/lazyvimium/plugins/LazyvimiumVisualContent.sys.mjs"
       ).hideCaret(this.contentWindow);
     }
-    this.sendAsyncMessage("Lazyvimium:State", {
+    const state = {
       mode: engine.mode,
       ...engine.pending,
       field: this.#inField,
-    });
+    };
+    if (
+      this.browsingContext.parent &&
+      state.mode == "n" &&
+      !state.tokens.length &&
+      !state.field
+    ) {
+      // A frame with nothing pending must not overwrite the page's mode,
+      // like visual mode's; the page says where it is.
+      this.sendAsyncMessage("Lazyvimium:FrameIdle");
+      return;
+    }
+    this.sendAsyncMessage("Lazyvimium:State", state);
   }
 }

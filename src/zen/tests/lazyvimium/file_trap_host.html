@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Trap host</title>
+</head>
+<body style="margin: 0; font: 20px sans-serif">
+  <p id="start">host start</p>
+  <!-- Another site, so another process; it scrolls too. -->
+  <iframe id="inner" width="400" height="200"
+          src="https://example.org/browser/zen/tests/lazyvimium/file_trap_frame.html"></iframe>
+  <div style="height: 3000px"></div>
+  <p id="end">host end</p>
+</body>
+</html>
