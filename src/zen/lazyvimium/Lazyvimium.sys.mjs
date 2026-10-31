@@ -26,6 +26,7 @@ import { LazyvimiumNavigationSpec } from "resource:///modules/lazyvimium/plugins
 import { LazyvimiumScrollSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumScroll.sys.mjs";
 import { LazyvimiumSessionSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumSession.sys.mjs";
 import { LazyvimiumTabsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumTabs.sys.mjs";
+import { LazyvimiumExtensionsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumExtensionsSpec.sys.mjs";
 import { LazyvimiumUblockSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUblockSpec.sys.mjs";
 import { LazyvimiumUiSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUi.sys.mjs";
 import { LazyvimiumWhichKeySpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumWhichKeySpec.sys.mjs";
@@ -76,6 +77,7 @@ export const LAZYVIMIUM_SPECS = [
   LazyvimiumToolbarSpec,
   LazyvimiumLibrarySpec,
   LazyvimiumAgentSpec,
+  LazyvimiumExtensionsSpec,
   LazyvimiumUblockSpec,
   LazyvimiumUiSpec,
   LazyvimiumSessionSpec,
@@ -787,6 +789,25 @@ class LazyvimiumService {
         messageManagerGroups: ["browsers"],
         // The parent checks everything a page sends: runFromKey only runs
         // mapped actions and updateState sanitizes the state.
+        safeForUntrustedWebProcess: true,
+        enablePreference: LazyvimiumOptions.PREF_ENABLED,
+      },
+      // The popups of extensions, whose browsers are in their own message
+      // manager group: jump labels on their controls.
+      LazyvimiumPopup: {
+        parent: {
+          esModuleURI:
+            "resource:///modules/lazyvimium/actors/LazyvimiumPopupParent.sys.mjs",
+        },
+        child: {
+          esModuleURI:
+            "resource:///modules/lazyvimium/actors/LazyvimiumPopupChild.sys.mjs",
+          events: {
+            DOMContentLoaded: {},
+          },
+        },
+        allFrames: true,
+        messageManagerGroups: ["webext-browsers"],
         safeForUntrustedWebProcess: true,
         enablePreference: LazyvimiumOptions.PREF_ENABLED,
       },

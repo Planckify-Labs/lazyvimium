@@ -116,15 +116,8 @@ export const LazyvimiumKeymapsSpec = {
     ["n", "<leader>an", "agent.new"],
     ["n", "<leader>al", "agent.log"],
 
-    // uBlock Origin, in LazyVim's <leader>x group.
-    ["n", "<leader>xx", "ublock.popup"],
-    ["n", "<leader>xz", "ublock.zapper"],
-    ["n", "<leader>xp", "ublock.picker"],
-    ["n", "<leader>xl", "ublock.logger"],
-    ["n", "<leader>xd", "ublock.dashboard"],
-    ["n", "<leader>xr", "ublock.relax"],
-    ["n", "<leader>xc", "ublock.toggleCosmetic"],
-    ["n", "<leader>xj", "ublock.toggleJavascript"],
+    // Every extension, uBlock Origin included, through one picker.
+    ["n", "<leader>x", "extensions.pick"],
 
     ["n", "<leader>?", "whichkey.show"],
     ["n", "<leader>e", "explorer.toggle"],
@@ -270,7 +263,6 @@ export const LazyvimiumKeymapsSpec = {
     ["n", "<leader>s", "search"],
     ["n", "<leader>u", "ui"],
     ["n", "<leader>w", "windows"],
-    ["n", "<leader>x", "block"],
     ["n", "[", "prev"],
     ["n", "]", "next"],
     ["n", "g", "goto"],

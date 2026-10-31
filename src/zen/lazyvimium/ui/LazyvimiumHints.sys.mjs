@@ -5,7 +5,7 @@
 import { LazyvimiumKeys } from "resource:///modules/lazyvimium/core/LazyvimiumKeys.sys.mjs";
 import { LABELS } from "resource:///modules/lazyvimium/ui/LazyvimiumPicker.sys.mjs";
 
-function hintLabels(count) {
+export function hintLabels(count) {
   if (count <= LABELS.length) {
     return [...LABELS].slice(0, count);
   }

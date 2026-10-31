@@ -21,6 +21,8 @@ EXTRA_JS_MODULES.lazyvimium.agent += [
 EXTRA_JS_MODULES.lazyvimium.actors += [
     "actors/LazyvimiumKeysChild.sys.mjs",
     "actors/LazyvimiumKeysParent.sys.mjs",
+    "actors/LazyvimiumPopupChild.sys.mjs",
+    "actors/LazyvimiumPopupParent.sys.mjs",
     "actors/LazyvimiumUiChild.sys.mjs",
     "actors/LazyvimiumUiParent.sys.mjs",
 ]
@@ -37,6 +39,7 @@ EXTRA_JS_MODULES.lazyvimium.core += [
     "core/LazyvimiumKeymap.sys.mjs",
     "core/LazyvimiumKeys.sys.mjs",
     "core/LazyvimiumPlugins.sys.mjs",
+    "core/LazyvimiumPopupHints.sys.mjs",
     "core/LazyvimiumShared.sys.mjs",
 ]
 
@@ -48,6 +51,7 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumEdit.sys.mjs",
     "plugins/LazyvimiumEditContent.sys.mjs",
     "plugins/LazyvimiumExplorerSpec.sys.mjs",
+    "plugins/LazyvimiumExtensionsSpec.sys.mjs",
     "plugins/LazyvimiumFind.sys.mjs",
     "plugins/LazyvimiumInputs.sys.mjs",
     "plugins/LazyvimiumInputsContent.sys.mjs",

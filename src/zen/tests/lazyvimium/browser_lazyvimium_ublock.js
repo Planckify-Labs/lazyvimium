@@ -40,19 +40,16 @@ async function installStandIn() {
   return addon;
 }
 
-add_task(async function test_keys_in_the_block_group() {
-  for (const [lhs, id] of [
-    ["<leader>xx", "ublock.popup"],
-    ["<leader>xz", "ublock.zapper"],
-    ["<leader>xp", "ublock.picker"],
-    ["<leader>xl", "ublock.logger"],
-    ["<leader>xd", "ublock.dashboard"],
-    ["<leader>xr", "ublock.relax"],
-    ["<leader>xc", "ublock.toggleCosmetic"],
-    ["<leader>xj", "ublock.toggleJavascript"],
-  ]) {
-    Assert.equal(Lazyvimium.keymap.get("n", lhs)?.rhs, id, `${lhs} runs ${id}`);
+add_task(async function test_no_keys_of_its_own() {
+  for (const lhs of ["<leader>xx", "<leader>xz", "<leader>xj"]) {
+    Assert.equal(Lazyvimium.keymap.get("n", lhs), null, `${lhs} is not mapped`);
   }
+  Assert.equal(
+    Lazyvimium.keymap.get("n", "<leader>x")?.rhs,
+    "extensions.pick",
+    "extensions are reached through one picker"
+  );
+  Assert.ok(Lazyvimium.actions.has("ublock.zapper"), "the actions stay");
 });
 
 add_task(async function test_actions_run_ublock_commands() {
@@ -126,4 +123,71 @@ add_task(async function test_turned_down_in_the_onboarding() {
   await LazyvimiumUblock.setEnabled(false);
   ok(!(await LazyvimiumUblock.getAddon()), "NO removes uBO");
   ok(!Services.prefs.getBoolPref(PREF), "and keeps it removed");
+});
+
+function pickerRow(label) {
+  return [...document.querySelectorAll(".lazyvimium-picker-item")].find(row =>
+    row.querySelector(".lazyvimium-picker-label").textContent.includes(label)
+  );
+}
+
+add_task(async function test_the_popup_has_labels() {
+  const extension = ExtensionTestUtils.loadExtension({
+    useAddonManager: "temporary",
+    manifest: {
+      name: "Picker Stand-in",
+      browser_specific_settings: { gecko: { id: "picker@example.com" } },
+      browser_action: { default_popup: "popup.html" },
+    },
+    files: {
+      "popup.html": `<!DOCTYPE html><meta charset="utf-8">
+        <body style="margin:0;width:200px;height:100px">
+        <button id="go" style="display:block">Go</button>
+        <input id="field" style="display:block">
+        <div id="hand" style="cursor:pointer;width:50px;height:20px">Hand</div>
+        <script src="popup.js"></script>`,
+      "popup.js": `
+        document.getElementById("go").onclick = () =>
+          browser.test.sendMessage("pressed");
+        const labelsOf = () =>
+          [...document.querySelectorAll("span[style*='ui-monospace']")].map(
+            span => span.textContent
+          );
+        const timer = setInterval(() => {
+          if (labelsOf().length) {
+            clearInterval(timer);
+            browser.test.sendMessage("labels", labelsOf());
+          }
+        }, 50);
+        document.getElementById("field").onfocus = () =>
+          setTimeout(() => browser.test.sendMessage("focused", labelsOf()), 300);`,
+    },
+  });
+  await extension.startup();
+
+  const done = Lazyvimium.run("extensions.pick");
+  await TestUtils.waitForCondition(
+    () => pickerRow("Picker Stand-in"),
+    "the picker lists the extension"
+  );
+  pickerRow("Picker Stand-in").click();
+  await done;
+
+  Assert.deepEqual(
+    await extension.awaitMessage("labels"),
+    ["a", "s", "d"],
+    "the button, the field and the clickable div are labelled in order"
+  );
+  EventUtils.synthesizeKey("a");
+  await extension.awaitMessage("pressed");
+  ok(true, "typing a label presses its control");
+
+  EventUtils.synthesizeKey("s");
+  Assert.deepEqual(
+    await extension.awaitMessage("focused"),
+    [],
+    "a field in focus gets the typing, not labels"
+  );
+
+  await extension.unload();
 });
