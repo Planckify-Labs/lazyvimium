@@ -2,37 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import { LazyvimiumControls } from "resource:///modules/lazyvimium/core/LazyvimiumControls.sys.mjs";
 import { LazyvimiumDom } from "resource:///modules/lazyvimium/core/LazyvimiumDom.sys.mjs";
 import { hintLabels } from "resource:///modules/lazyvimium/ui/LazyvimiumHints.sys.mjs";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
-// What a user can press, type in or toggle, by its markup.
-const CONTROLS = [
-  "a[href]",
-  "button",
-  "input:not([type=hidden])",
-  "select",
-  "textarea",
-  "summary",
-  "[role=button]",
-  "[role=link]",
-  "[role=checkbox]",
-  "[role=switch]",
-  "[role=tab]",
-  "[role=menuitem]",
-  "[role=radio]",
-  "[role=option]",
-  "[role=combobox]",
-  "[role=textbox]",
-  "[role=slider]",
-  "[contenteditable]:not([contenteditable=false])",
-  "[tabindex]:not([tabindex='-1'])",
-  "[onclick]",
-].join(",");
-
-const MAX_ELEMENTS = 5000;
-const MIN_SIZE = 4;
 // The popup keeps changing for a while after it loads.
 const SETTLE_MS = [100, 300, 800];
 
@@ -147,74 +122,13 @@ export class LazyvimiumPopupHints {
     if (this.#suspended || !this.#window.document.documentElement) {
       return;
     }
-    this.#targets = this.#find();
+    this.#targets = LazyvimiumControls.inReadingOrder(
+      LazyvimiumControls.find(this.#window)
+    );
     this.#labels = hintLabels(this.#targets.length);
     this.#draw();
     // Drawing the labels changed the document, which is not the popup's doing.
     this.#observer.takeRecords();
-  }
-
-  /**
-   * The controls on screen in reading order: top to bottom, then left to
-   * right.
-   *
-   * @returns {Element[]}
-   */
-  #find() {
-    const window = this.#window;
-    const found = [];
-    const semantic = new Set(window.document.querySelectorAll(CONTROLS));
-    let seen = 0;
-    for (const element of window.document.querySelectorAll("body *")) {
-      if (++seen > MAX_ELEMENTS) {
-        break;
-      }
-      const isControl = semantic.has(element);
-      // A div with a click handler has no markup to say so, only a hand for
-      // a cursor; its children share it.
-      const hasHand =
-        !isControl &&
-        window.getComputedStyle(element).cursor == "pointer" &&
-        !found.some(other => other.contains(element)) &&
-        element.parentElement &&
-        window.getComputedStyle(element.parentElement).cursor != "pointer";
-      if ((isControl || hasHand) && !element.disabled && this.#shown(element)) {
-        found.push(element);
-      }
-    }
-    const line = element => Math.round(element.getBoundingClientRect().top / 8);
-    return found.sort(
-      (a, b) =>
-        line(a) - line(b) ||
-        a.getBoundingClientRect().left - b.getBoundingClientRect().left
-    );
-  }
-
-  // Whether the element is on screen and nothing covers it.
-  #shown(element) {
-    const window = this.#window;
-    const rect = element.getBoundingClientRect();
-    if (
-      !element.checkVisibility() ||
-      rect.width < MIN_SIZE ||
-      rect.height < MIN_SIZE ||
-      rect.bottom <= 0 ||
-      rect.right <= 0 ||
-      rect.top >= window.innerHeight ||
-      rect.left >= window.innerWidth
-    ) {
-      return false;
-    }
-    const hit = window.document.elementFromPoint(
-      Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1),
-      Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1)
-    );
-    return (
-      !!hit &&
-      (element.contains(hit) ||
-        hit.contains(element) ||
-        hit.closest("label")?.control === element)
-    );
   }
 
   #draw() {

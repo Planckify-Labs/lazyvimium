@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Jump host</title>
+</head>
+<body style="margin: 20px">
+  <div><button id="top" onclick="document.title = 'top pressed'">Top button</button></div>
+  <!-- Another site, so another process, as a payment form or a CAPTCHA is. -->
+  <iframe id="inner" width="360" height="260"
+          src="https://example.org/browser/zen/tests/lazyvimium/file_jump_frame.html"></iframe>
+</body>
+</html>

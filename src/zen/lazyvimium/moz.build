@@ -34,13 +34,18 @@ EXTRA_JS_MODULES.lazyvimium.config += [
 
 EXTRA_JS_MODULES.lazyvimium.core += [
     "core/LazyvimiumActions.sys.mjs",
+    "core/LazyvimiumControls.sys.mjs",
     "core/LazyvimiumDom.sys.mjs",
+    "core/LazyvimiumJumpLabels.sys.mjs",
     "core/LazyvimiumKeyEngine.sys.mjs",
     "core/LazyvimiumKeymap.sys.mjs",
     "core/LazyvimiumKeys.sys.mjs",
+    "core/LazyvimiumPageText.sys.mjs",
     "core/LazyvimiumPlugins.sys.mjs",
     "core/LazyvimiumPopupHints.sys.mjs",
     "core/LazyvimiumShared.sys.mjs",
+    "core/LazyvimiumTextObjects.sys.mjs",
+    "core/LazyvimiumYankRing.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.lazyvimium.plugins += [
@@ -55,6 +60,8 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumFind.sys.mjs",
     "plugins/LazyvimiumInputs.sys.mjs",
     "plugins/LazyvimiumInputsContent.sys.mjs",
+    "plugins/LazyvimiumJump.sys.mjs",
+    "plugins/LazyvimiumJumpContent.sys.mjs",
     "plugins/LazyvimiumLibrary.sys.mjs",
     "plugins/LazyvimiumNavigation.sys.mjs",
     "plugins/LazyvimiumScroll.sys.mjs",
@@ -64,8 +71,12 @@ EXTRA_JS_MODULES.lazyvimium.plugins += [
     "plugins/LazyvimiumToolbarSpec.sys.mjs",
     "plugins/LazyvimiumUblockSpec.sys.mjs",
     "plugins/LazyvimiumUi.sys.mjs",
+    "plugins/LazyvimiumVisual.sys.mjs",
+    "plugins/LazyvimiumVisualContent.sys.mjs",
     "plugins/LazyvimiumWhichKeySpec.sys.mjs",
     "plugins/LazyvimiumWindows.sys.mjs",
+    "plugins/LazyvimiumYank.sys.mjs",
+    "plugins/LazyvimiumYankContent.sys.mjs",
     "plugins/LazyvimiumZenCommands.sys.mjs",
 ]
 

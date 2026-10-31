@@ -14,6 +14,9 @@ import {
 // version.
 let gCached = null;
 
+const JUMP_MODULE =
+  "resource:///modules/lazyvimium/plugins/LazyvimiumJumpContent.sys.mjs";
+
 // A page that keeps refocusing its field gets it after this many refusals,
 // rather than a focus fight.
 const MAX_REFUSED_FOCUS = 3;
@@ -36,6 +39,8 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
   #explicitInsert = false;
   #refusedFocus = 0;
   #lastInput = null;
+  // The jump session that takes the keys, until it is done.
+  #capture = null;
   // Whether a page field has focus. The parent needs it to take reserved
   // browser shortcuts, like Ctrl+W, only while the user is typing.
   #inField = false;
@@ -78,6 +83,10 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
         // focusout fires before the next element takes focus.
         Promise.resolve().then(() => this.#syncMode());
         break;
+      case "copy":
+      case "cut":
+        this.#onCopy();
+        break;
       case "pageshow":
         if (!this.browsingContext.parent) {
           const engine = this.#ensureEngine();
@@ -90,10 +99,33 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
   }
 
   receiveMessage(message) {
-    if (message.name == "Lazyvimium:RunContent") {
-      return this.runAction(message.data.id, message.data.args ?? {});
+    switch (message.name) {
+      case "Lazyvimium:RunContent":
+        return this.runAction(message.data.id, message.data.args ?? {});
+      // From the jump of the page this frame is in.
+      case "Lazyvimium:CollectControls":
+        return ChromeUtils.importESModule(JUMP_MODULE).collectControls(
+          this,
+          this.contentWindow
+        );
+      case "Lazyvimium:PressControl":
+        return ChromeUtils.importESModule(JUMP_MODULE).pressControl(
+          this,
+          this.contentWindow,
+          message.data
+        );
     }
     return undefined;
+  }
+
+  /**
+   * Send the keys that follow to a session, like a jump's, until it is done.
+   *
+   * @param {{handleKey: (event: KeyboardEvent) => void, done: boolean}} session
+   */
+  startCapture(session) {
+    // A session with nothing to pick is over before it starts.
+    this.#capture = session.done ? null : session;
   }
 
   /**
@@ -184,6 +216,13 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
     }
     const active = LazyvimiumDom.deepActiveElement(this.document);
     const editing = LazyvimiumDom.isEditable(active);
+    if (editing && engine.mode == "v") {
+      // Clicking into a field ends visual mode.
+      this.#inField = true;
+      this.#lastInput = new WeakRef(active);
+      engine.setMode("i");
+      return;
+    }
     if (editing && engine.mode == "n" && this.#isStolenFocus()) {
       // Pages like Wikipedia focus their search field on load, which would
       // put the page in insert mode before the user did anything.
@@ -220,6 +259,15 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
     if (!engine || LazyvimiumDom.agentTyping) {
       return;
     }
+    if (this.#capture) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.#capture.handleKey(event);
+      if (this.#capture.done) {
+        this.#capture = null;
+      }
+      return;
+    }
     this.#syncMode();
     if (engine.feed(LazyvimiumKeys.fromEvent(event))) {
       event.preventDefault();
@@ -237,6 +285,10 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
     }
     const args = count !== null && action.params?.count ? { count } : {};
     if (action.where == "content") {
+      if (action.params?.lhs) {
+        // One action serves many keys, like every text object's.
+        args.lhs = mapping.lhs;
+      }
       Promise.resolve()
         .then(() => this.runAction(mapping.rhs, args))
         .catch(e => console.error(`Lazyvimium: "${mapping.rhs}" failed`, e));
@@ -245,7 +297,35 @@ export class LazyvimiumKeysChild extends JSWindowActorChild {
     }
   }
 
+  // What the user copied or cut in the page, for the yank ring. Passwords
+  // never go there.
+  #onCopy() {
+    const window = this.contentWindow;
+    const field = LazyvimiumDom.deepActiveElement(this.document);
+    let text;
+    if (field?.localName == "input" || field?.localName == "textarea") {
+      if (field.type == "password") {
+        return;
+      }
+      text = field.value.substring(field.selectionStart, field.selectionEnd);
+    } else {
+      text = window.getSelection().toString();
+    }
+    if (text?.trim()) {
+      this.sendAsyncMessage("Lazyvimium:Yank", {
+        text,
+        url: this.document.documentURI,
+        title: this.document.title,
+      });
+    }
+  }
+
   #reportState(engine) {
+    if (engine.mode != "v") {
+      ChromeUtils.importESModule(
+        "resource:///modules/lazyvimium/plugins/LazyvimiumVisualContent.sys.mjs"
+      ).hideCaret(this.contentWindow);
+    }
     this.sendAsyncMessage("Lazyvimium:State", {
       mode: engine.mode,
       ...engine.pending,

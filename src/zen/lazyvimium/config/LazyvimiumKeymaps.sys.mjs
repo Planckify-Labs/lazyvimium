@@ -5,6 +5,8 @@
 // The default keymaps, after LazyVim's lua/lazyvim/config/keymaps.lua.
 // Buffers are tabs, tab pages are Zen spaces, windows are split view panes.
 
+import { TEXT_OBJECT_KEYS } from "resource:///modules/lazyvimium/core/LazyvimiumTextObjects.sys.mjs";
+
 export const LazyvimiumKeymapsSpec = {
   name: "keymaps",
   priority: 100,
@@ -65,6 +67,59 @@ export const LazyvimiumKeymapsSpec = {
     ["n", "yy", "yank.url"],
     ["n", "p", "url.paste"],
     ["n", "P", "url.pasteNewTab"],
+
+    // Jump labels on every link, button and field of the page, frames
+    // included; gs narrows them by typing some of their text first.
+    ["n", "s", "jump.hints"],
+    ["n", "gs", "jump.controls"],
+
+    // Visual mode on the page's text, after vim's. The motions grow the
+    // selection; the cursor is a bar at its moving end.
+    ["n", "v", "visual.enter"],
+    ["n", "S", "jump.text"],
+    ["v", "<Esc>", "visual.exit"],
+    ["v", "v", "visual.exit"],
+    ["v", "y", "visual.yank"],
+    ["v", "o", "visual.swapEnds"],
+    ["v", "h", "visual.left"],
+    ["v", "l", "visual.right"],
+    ["v", "j", "visual.down"],
+    ["v", "k", "visual.up"],
+    ["v", "<Left>", "visual.left"],
+    ["v", "<Right>", "visual.right"],
+    ["v", "<Down>", "visual.down"],
+    ["v", "<Up>", "visual.up"],
+    ["v", "w", "visual.wordForward"],
+    ["v", "e", "visual.wordForward"],
+    ["v", "b", "visual.wordBackward"],
+    ["v", "0", "visual.lineStart"],
+    ["v", "^", "visual.lineStart"],
+    ["v", "$", "visual.lineEnd"],
+    ["v", "}", "visual.paragraphForward"],
+    ["v", "{", "visual.paragraphBackward"],
+    ["v", "gg", "visual.top"],
+    ["v", "G", "visual.bottom"],
+    // Labels on every word and paragraph, to grow the selection to one.
+    ["v", "s", "jump.words"],
+    ["v", "S", "jump.text"],
+    ["v", "<C-d>", "scroll.halfPageDown"],
+    ["v", "<C-u>", "scroll.halfPageUp"],
+    ["v", "<C-f>", "scroll.pageDown"],
+    ["v", "<C-b>", "scroll.pageUp"],
+    ["v", "?", "whichkey.show"],
+    // Text objects: va{ vi" vap va/ viw ...
+    ...TEXT_OBJECT_KEYS.flatMap(key => {
+      const typed = key == "<" ? "<lt>" : key;
+      return [
+        ["v", `a${typed}`, "visual.object"],
+        ["v", `i${typed}`, "visual.object"],
+      ];
+    }),
+
+    // The yank ring, and cycling it in a field after a put.
+    ["n", "<leader>p", "yank.history"],
+    ["i", "<A-p>", "yank.putPrev"],
+    ["i", "<A-n>", "yank.putNext"],
 
     ["n", "/", "search.page"],
     ["n", "n", "search.next"],
@@ -266,6 +321,8 @@ export const LazyvimiumKeymapsSpec = {
     ["n", "[", "prev"],
     ["n", "]", "next"],
     ["n", "g", "goto"],
+    ["v", "a", "around"],
+    ["v", "i", "inside"],
     ["e", "g", "goto"],
     ["e", "z", "fold"],
     ["l", "g", "goto"],

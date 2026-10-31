@@ -4,7 +4,12 @@
 
 // History works like vim's jumplist: <C-o> back, <C-i> forward.
 
-function readClipboard(window) {
+/**
+ * @param {Window} window
+ * @param {{trim?: boolean}} [options]
+ * @returns {string} The clipboard's text.
+ */
+export function readClipboard(window, { trim = true } = {}) {
   const transferable = Cc["@mozilla.org/widget/transferable;1"].createInstance(
     Ci.nsITransferable
   );
@@ -17,7 +22,8 @@ function readClipboard(window) {
   } catch {
     return "";
   }
-  return data.value?.QueryInterface(Ci.nsISupportsString).data.trim() ?? "";
+  const text = data.value?.QueryInterface(Ci.nsISupportsString).data ?? "";
+  return trim ? text.trim() : text;
 }
 
 /**

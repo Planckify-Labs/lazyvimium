@@ -11,6 +11,8 @@ firefox-appdir = "browser"
 
 ["test_agent_ui.js"]
 
+["test_jump_labels.js"]
+
 ["test_key_engine.js"]
 
 ["test_keymap.js"]
@@ -25,6 +27,10 @@ firefox-appdir = "browser"
 
 ["test_specs.js"]
 
+["test_text_objects.js"]
+
 ["test_theme.js"]
 
 ["test_which_key.js"]
+
+["test_yank_ring.js"]

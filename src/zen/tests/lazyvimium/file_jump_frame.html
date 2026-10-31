@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Jump frame</title>
+</head>
+<body style="margin: 10px">
+  <div><button id="pay" onclick="document.getElementById('out').textContent = event.isTrusted ? 'paid' : 'untrusted'">Pay now</button></div>
+  <p id="out">idle</p>
+  <!-- A frame in the frame. -->
+  <iframe id="nested" width="300" height="100"
+          src="https://example.com/browser/zen/tests/lazyvimium/file_jump_inner.html"></iframe>
+</body>
+</html>

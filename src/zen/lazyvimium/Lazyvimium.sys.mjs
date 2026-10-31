@@ -21,6 +21,7 @@ import { LazyvimiumExplorerSpec } from "resource:///modules/lazyvimium/plugins/L
 import { LazyvimiumToolbarSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumToolbarSpec.sys.mjs";
 import { LazyvimiumFindSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumFind.sys.mjs";
 import { LazyvimiumInputsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumInputs.sys.mjs";
+import { LazyvimiumJumpSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumJump.sys.mjs";
 import { LazyvimiumLibrarySpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumLibrary.sys.mjs";
 import { LazyvimiumNavigationSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumNavigation.sys.mjs";
 import { LazyvimiumScrollSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumScroll.sys.mjs";
@@ -29,8 +30,10 @@ import { LazyvimiumTabsSpec } from "resource:///modules/lazyvimium/plugins/Lazyv
 import { LazyvimiumExtensionsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumExtensionsSpec.sys.mjs";
 import { LazyvimiumUblockSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUblockSpec.sys.mjs";
 import { LazyvimiumUiSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumUi.sys.mjs";
+import { LazyvimiumVisualSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumVisual.sys.mjs";
 import { LazyvimiumWhichKeySpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumWhichKeySpec.sys.mjs";
 import { LazyvimiumWindowsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumWindows.sys.mjs";
+import { LazyvimiumYankSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumYank.sys.mjs";
 import { LazyvimiumZenCommandsSpec } from "resource:///modules/lazyvimium/plugins/LazyvimiumZenCommands.sys.mjs";
 
 const lazy = {};
@@ -71,6 +74,9 @@ export const LAZYVIMIUM_SPECS = [
   LazyvimiumNavigationSpec,
   LazyvimiumInputsSpec,
   LazyvimiumEditSpec,
+  LazyvimiumJumpSpec,
+  LazyvimiumVisualSpec,
+  LazyvimiumYankSpec,
   LazyvimiumFindSpec,
   LazyvimiumWindowsSpec,
   LazyvimiumExplorerSpec,
@@ -783,6 +789,8 @@ class LazyvimiumService {
             focusin: { capture: true },
             focusout: { capture: true },
             pageshow: {},
+            copy: { capture: true },
+            cut: { capture: true },
           },
         },
         allFrames: true,
